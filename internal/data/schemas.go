@@ -15,3 +15,16 @@ type User struct {
 	LastName   string             `json:"last_name" bson:"last_name"`
 	DateJoined time.Time          `json:"date_joined" bson:"date_joined"`
 }
+
+type LoginRequest struct {
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+type RegisterRequest struct {
+	Username  string `json:"username" validate:"required"`
+	Email     string `json:"email" validate:"required,email"`
+	Password  string `json:"password" validate:"required"`
+	FirstName string `json:"first_name" validate:"required"`
+	LastName  string `json:"last_name" validate:"required"`
+}

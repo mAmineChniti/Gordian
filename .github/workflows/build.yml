@@ -24,11 +24,10 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Install air
-        run: go install github.com/air-verse/air@latest
-
       - name: Run Server
-        run: make run &
+        run: |
+         make run &
+         sleep 10
 
       - name: Send Request
         run: |

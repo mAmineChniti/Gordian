@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,7 +22,8 @@ import (
 type Service interface {
 	Health() (map[string]string, error)
 	FindUser(username string, password string) (*data.User, error)
-	CreateSession(userID primitive.ObjectID) (string, error)
+	CreateUser(user *data.RegisterRequest) (*data.User, string, string, error)
+	CreateSession(userID primitive.ObjectID) (string, string, error)
 	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
 
@@ -31,7 +34,7 @@ type service struct {
 var (
 	host      = os.Getenv("DB_HOST")
 	port      = os.Getenv("DB_PORT")
-	jwtSecret = os.Getenv("JWTSECRET")
+	jwtSecret = []byte(os.Getenv("JWTSECRET"))
 )
 
 func New() Service {
@@ -60,29 +63,86 @@ func (s *service) FindUser(username string, password string) (*data.User, error)
 	return &foundUser, nil
 }
 
-func (s *service) CreateSession(userID primitive.ObjectID) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour)
-	claims := &jwt.RegisteredClaims{
-		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(expirationTime),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(jwtSecret)
+func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", fmt.Errorf("failed to create JWT token: %v", err)
+		return nil, "", "", fmt.Errorf("failed to hash password: %v", err)
 	}
-	return tokenString, nil
+	endUser := data.User{
+		ID:         primitive.NewObjectID(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Password:   user.Password,
+		Hash:       string(hash),
+		FirstName:  user.FirstName,
+		LastName:   user.LastName,
+		DateJoined: time.Now(),
+	}
+	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to insert user: %v", err)
+	}
+	accessToken, refreshToken, err := s.CreateSession(endUser.ID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to create session: %v", err)
+	}
+	return &endUser, accessToken, refreshToken, nil
+
 }
 
-func (s *service) ValidateToken(tokenString string) (primitive.ObjectID, error) {
+func (s *service) CreateSession(userID primitive.ObjectID) (string, string, error) {
+	accessExpirationTime := time.Now().Add(15 * time.Minute)
+	accessClaims := &jwt.RegisteredClaims{
+		Subject:   userID.Hex(),
+		ExpiresAt: jwt.NewNumericDate(accessExpirationTime),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessTokenString, err := accessToken.SignedString(jwtSecret)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create access JWT token: %v", err)
+	}
+
+	refreshExpirationTime := time.Now().Add(7 * 24 * time.Hour)
+	refreshClaims := &jwt.RegisteredClaims{
+		Subject:   userID.Hex(),
+		ExpiresAt: jwt.NewNumericDate(refreshExpirationTime),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, err := refreshToken.SignedString(jwtSecret)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create refresh JWT token: %v", err)
+	}
+
+	return accessTokenString, refreshTokenString, nil
+}
+
+func (s *service) ValidateToken(authHeader string) (primitive.ObjectID, error) {
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return primitive.ObjectID{}, fmt.Errorf("invalid token format")
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
 	claims := &jwt.RegisteredClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return jwtSecret, nil
 	})
 
-	if err != nil || !token.Valid {
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return primitive.ObjectID{}, fmt.Errorf("token expired: %v", err)
+		}
 		return primitive.ObjectID{}, fmt.Errorf("invalid token: %v", err)
+	}
+
+	if !token.Valid {
+		return primitive.ObjectID{}, fmt.Errorf("invalid token")
 	}
 
 	userID, err := primitive.ObjectIDFromHex(claims.Subject)
