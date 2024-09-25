@@ -3,12 +3,16 @@ module github.com/mAmineChniti/Gordian
 go 1.23.1
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.33.0
 	go.mongodb.org/mongo-driver v1.17.0
+	golang.org/x/crypto v0.27.0
 )
+
+require github.com/golang-jwt/jwt/v5 v5.2.1
+
+require github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
@@ -30,7 +34,9 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
+	github.com/labstack/echo-jwt v0.0.0-20221127215225-c84d41a71003
 	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
@@ -64,7 +70,6 @@ require (
 	go.opentelemetry.io/otel v1.24.0 // indirect
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.opentelemetry.io/otel/trace v1.24.0 // indirect
-	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/net v0.29.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.25.0 // indirect
