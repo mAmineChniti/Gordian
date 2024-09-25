@@ -11,7 +11,7 @@ import (
 
 func TestHandler(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1", nil)
 	resp := httptest.NewRecorder()
 	c := e.NewContext(req, resp)
 	s := &Server{}

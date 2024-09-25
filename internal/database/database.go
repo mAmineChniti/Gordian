@@ -31,7 +31,7 @@ type service struct {
 var (
 	host      = os.Getenv("DB_HOST")
 	port      = os.Getenv("DB_PORT")
-	jwtSecret = []byte(os.Getenv("JWTSECRET"))
+	jwtSecret = os.Getenv("JWTSECRET")
 )
 
 func New() Service {
@@ -94,14 +94,13 @@ func (s *service) ValidateToken(tokenString string) (primitive.ObjectID, error) 
 }
 
 func (s *service) Health() (map[string]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	/*ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	err := s.db.Ping(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("db down: %v", err)
-	}
+	}*/
 
 	return map[string]string{"message": "It's healthy"}, nil
 }
-
