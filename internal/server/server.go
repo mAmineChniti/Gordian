@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,8 +20,13 @@ type Server struct {
 }
 
 func NewServer() *http.Server {
-	port, err := strconv.Atoi(os.Getenv("PORT"))
+	envPort := os.Getenv("PORT")
+	if envPort == "" {
+		envPort = "8080"
+	}
+	port, err := strconv.Atoi(envPort)
 	if err != nil {
+		log.Printf("Error converting PORT to integer, using default port 8080: %v", err)
 		port = 8080
 	}
 	NewServer := &Server{
