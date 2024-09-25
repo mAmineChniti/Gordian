@@ -10,19 +10,19 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-var jwtSecret = []byte(os.Getenv("JWTSECRET"))
+var jwtSecret = os.Getenv("JWTSECRET")
 
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
-	e.GET("/", s.HelloWorldHandler)
-	e.POST("/login", s.Login)
-	e.GET("/health", s.healthHandler)
+	e.GET("/api/v1", s.HelloWorldHandler)
+	e.POST("/api/v1/login", s.Login)
+	e.GET("/api/v1/health", s.healthHandler)
 
 	// Protected route
-	e.GET("/protected", s.ProtectedHandler, s.JWTMiddleware())
+	e.GET("/api/v1/protected", s.ProtectedHandler, s.JWTMiddleware())
 
 	return e
 }
