@@ -22,8 +22,16 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.Use(middleware.Recover())
 
 	e.GET("/api/v1", s.HelloWorldHandler)
-	e.POST("/api/v1/login", s.Login)
+	// Create
 	e.POST("/api/v1/register", s.Register)
+	// Read
+	e.POST("/api/v1/login", s.Login)
+	// Update
+	//
+	// Patch
+	//
+	// Delete
+	//
 	e.GET("/api/v1/health", s.healthHandler)
 
 	e.GET("/api/v1/protected", s.ProtectedHandler, s.JWTMiddleware())
