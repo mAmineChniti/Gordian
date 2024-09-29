@@ -23,6 +23,7 @@ type Service interface {
 	Health() (map[string]string, error)
 	FindUser(username string, password string) (*data.User, error)
 	CreateUser(user *data.RegisterRequest) (*data.User, string, string, error)
+	UpdateUser(userID primitive.ObjectID, user *data.User) (*data.User, error)
 	CreateSession(userID primitive.ObjectID) (string, string, error)
 	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
@@ -32,15 +33,16 @@ type service struct {
 }
 
 var (
-	host      = os.Getenv("DB_HOST")
-	port      = os.Getenv("DB_PORT")
-	jwtSecret = []byte(os.Getenv("JWTSECRET"))
+	dbUsername       = os.Getenv("DB_USERNAME")
+	dbPassword       = os.Getenv("DB_PASSWORD")
+	connectionString = os.Getenv("DB_CONNECTION_STRING")
+	jwtSecret        = []byte(os.Getenv("JWTSECRET"))
 )
 
 func New() Service {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", host, port)))
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(fmt.Sprintf("mongodb+srv://%s:%s%s", dbUsername, dbPassword, connectionString)))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("db con err: %s", err.Error())
 	}
 	return &service{db: client}
 }
@@ -66,6 +68,14 @@ func (s *service) FindUser(username string, password string) (*data.User, error)
 func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	filter := bson.M{"$or": []bson.M{{"username": user.Username}, {"email": user.Email}}}
+	foundUser, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to check if user exists: %v", err)
+	}
+	if foundUser > 0 {
+		return nil, "", "", fmt.Errorf("user already exists")
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to hash password: %v", err)
@@ -74,7 +84,6 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, st
 		ID:         primitive.NewObjectID(),
 		Username:   user.Username,
 		Email:      user.Email,
-		Password:   user.Password,
 		Hash:       string(hash),
 		FirstName:  user.FirstName,
 		LastName:   user.LastName,
@@ -90,6 +99,24 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, st
 	}
 	return &endUser, accessToken, refreshToken, nil
 
+}
+
+func (s *service) UpdateUser(userID primitive.ObjectID, user *data.User) (*data.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var userToUpdate data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&userToUpdate)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("user not found: %v", err)
+		}
+		return nil, fmt.Errorf("db error: %v", err)
+	}
+	_, err = s.db.Database("gordian").Collection("users").UpdateOne(ctx, bson.M{"_id": userID}, bson.M{"$set": bson.M{"username": user.Username, "email": user.Email, "firstName": user.FirstName, "lastName": user.LastName}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to update user: %v", err)
+	}
+	return user, nil
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (string, string, error) {
