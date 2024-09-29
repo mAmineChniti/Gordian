@@ -11,6 +11,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PORT: ${{ secrets.PORT }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+      JWTSECRET: ${{ secrets.JWTSECRET }}
 
     steps:
       - name: Setup Checkout
@@ -24,19 +30,21 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Build
+        run: make build
+
       - name: Run Server
         run: |
-         make run &
-         sleep 10
+          ./main &
+          sleep 30
 
       - name: Send Request
         run: |
-          API_URL="http://127.0.0.1:8080/api/v1/health"
+          API_URL="http://127.0.0.1:${{ secrets.PORT }}/api/v1/health"
           STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" $API_URL)
-          if [ $STATUS_CODE -eq 200 ]; then
+          if [ "$STATUS_CODE" -eq 200 ]; then
             echo "API is deployed and responding with status code 200 (OK)"
           else
             echo "Error: API deployment failed. Received status code: $STATUS_CODE"
             exit 1
           fi
-

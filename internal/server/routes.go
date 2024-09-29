@@ -27,7 +27,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	// Read
 	e.POST("/api/v1/login", s.Login)
 	// Update
-	//
+	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	// Patch
 	//
 	// Delete
@@ -45,7 +45,9 @@ func (s *Server) Login(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-
+	if err := data.ValidateStruct(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": err.Error()})
+	}
 	user, err := s.db.FindUser(req.Username, req.Password)
 	if err != nil {
 		if strings.Contains(err.Error(), "user not found") || strings.Contains(err.Error(), "invalid password") {
@@ -72,7 +74,9 @@ func (s *Server) Register(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-
+	if err := data.ValidateStruct(req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": err.Error()})
+	}
 	user, accessToken, refreshToken, err := s.db.CreateUser(&req)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
@@ -83,6 +87,29 @@ func (s *Server) Register(c echo.Context) error {
 		"user":          user,
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
+	})
+}
+func (s *Server) Update(c echo.Context) error {
+	var req data.User
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+	}
+
+	authHeader := c.Request().Header.Get("Authorization")
+	userID, err := s.db.ValidateToken(authHeader)
+
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+	}
+
+	user, err := s.db.UpdateUser(userID, &req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "User updated successfully",
+		"user":    user,
 	})
 }
 
