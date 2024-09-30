@@ -17,9 +17,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-var jwtSecret = []byte(os.Getenv("JWTSECRET"))
+var (
+	jwtSecret = []byte(os.Getenv("JWTSECRET"))
+	debug     = os.Getenv("DEBUG") == "true"
+)
 
-func DEBUG(e *echo.Echo, debug bool) {
+func DEBUG(e *echo.Echo) {
 	if debug {
 		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
 			formattedReq := json.RawMessage(reqBody)
@@ -50,7 +53,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 		Format: "method=${method}, uri=${uri}, status=${status}\n",
 	}))
 
-	DEBUG(e, false)
+	DEBUG(e)
 
 	e.Use(middleware.Recover())
 

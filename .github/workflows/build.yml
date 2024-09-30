@@ -17,6 +17,7 @@ jobs:
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
       JWTSECRET: ${{ secrets.JWTSECRET }}
+      DEBUG: ${{ secrets.DEBUG }}
 
     steps:
       - name: Setup Checkout
