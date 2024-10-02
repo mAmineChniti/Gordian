@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 var (
@@ -57,10 +58,11 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	e.Use(middleware.Recover())
 
-	e.GET("/api/v1", s.HelloWorldHandler)
+	//e.GET("/api/v1", s.Docs)
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
+	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
 	e.GET("/api/v1/protected", s.ProtectedHandler, s.JWTMiddleware())
 	e.POST("/api/v1/refresh", s.RefreshTokenHandler)
@@ -74,11 +76,15 @@ func (s *Server) Login(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-	if err := data.ValidateStruct(req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": err.Error()})
+	validationErrors, err := data.ValidateStruct(req)
+	if err != nil {
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  validationErrors,
+		})
 	}
-	user, err := s.db.FindUser(req.Username, req.Password)
+	user, err := s.db.FindUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
 		if strings.Contains(err.Error(), "user not found") || strings.Contains(err.Error(), "invalid password") {
@@ -107,9 +113,13 @@ func (s *Server) Register(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-	if err := data.ValidateStruct(req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": err.Error()})
+	validationErrors, err := data.ValidateStruct(req)
+	if err != nil {
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  validationErrors,
+		})
 	}
 	user, accessToken, refreshToken, err := s.db.CreateUser(&req)
 	if err != nil {
@@ -124,38 +134,43 @@ func (s *Server) Register(c echo.Context) error {
 		"refresh_token": refreshToken,
 	})
 }
+
 func (s *Server) Update(c echo.Context) error {
-	var req data.User
+	var req data.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+		c.Logger().Error("Bind error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 
-	authHeader := c.Request().Header.Get("Authorization")
-	userID, err := s.db.ValidateToken(authHeader)
-
+	validationErrors, err := data.ValidateStruct(req)
 	if err != nil {
-		c.Logger().Error(err.Error())
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"message": "Validation failed",
+			"errors":  validationErrors,
+		})
+	}
+
+	// Assuming JWT middleware sets the user ID in the context
+	userID, ok := c.Get("userID").(primitive.ObjectID)
+	if !ok {
+		c.Logger().Error("Invalid user ID in context")
 		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
 	}
 
-	user, err := s.db.UpdateUser(userID, &req)
+	updatedUser, err := s.db.UpdateUser(userID, &req)
 	if err != nil {
-		c.Logger().Error(err.Error())
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
+		}
+		c.Logger().Error("UpdateUser error:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message": "User updated successfully",
-		"user":    user,
+		"user":    updatedUser,
 	})
-}
-
-func (s *Server) HelloWorldHandler(c echo.Context) error {
-	resp := map[string]string{
-		"message": "Hello World",
-	}
-	return c.JSON(http.StatusOK, resp)
 }
 
 func (s *Server) healthHandler(c echo.Context) error {

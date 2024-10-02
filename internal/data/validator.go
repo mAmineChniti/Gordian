@@ -12,19 +12,24 @@ func init() {
 	validate = validator.New()
 }
 
-func ValidateStruct(s interface{}) error {
+func ValidateStruct(s interface{}) (map[string]string, error) {
 	err := validate.Struct(s)
+	if req, ok := s.(UpdateRequest); ok {
+		if req.Username == "" && req.Email == "" && req.Password == "" && req.FirstName == "" && req.LastName == "" {
+			return nil, fmt.Errorf("empty update request")
+		}
+	}
 	if err != nil {
 		if _, ok := err.(*validator.InvalidValidationError); ok {
-			return fmt.Errorf("invalid validation error: %v", err)
+			return nil, fmt.Errorf("invalid validation error: %w", err)
 		}
 
 		validationErrors := err.(validator.ValidationErrors)
-		errorMessages := ""
+		errorsMap := make(map[string]string)
 		for _, fieldErr := range validationErrors {
-			errorMessages += fmt.Sprintf("Field '%s' failed on the '%s' tag\n", fieldErr.Field(), fieldErr.Tag())
+			errorsMap[fieldErr.Field()] = fmt.Sprintf("failed on '%s' tag", fieldErr.Tag())
 		}
-		return fmt.Errorf("validation errors:\n%s", errorMessages)
+		return errorsMap, fmt.Errorf("validation errors")
 	}
-	return nil
+	return nil, nil
 }
