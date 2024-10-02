@@ -21,9 +21,9 @@ import (
 
 type Service interface {
 	Health() (map[string]string, error)
-	FindUser(username string, password string) (*data.User, error)
+	FindUser(user *data.LoginRequest) (*data.User, error)
 	CreateUser(user *data.RegisterRequest) (*data.User, string, string, error)
-	UpdateUser(userID primitive.ObjectID, user *data.User) (*data.User, error)
+	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	CreateSession(userID primitive.ObjectID) (string, string, error)
 	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
@@ -47,19 +47,19 @@ func New() Service {
 	return &service{db: client}
 }
 
-func (s *service) FindUser(username string, password string) (*data.User, error) {
+func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"username": username}).Decode(&foundUser)
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"username": req.Username}).Decode(&foundUser)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("user not found: %v", err)
 		}
 		return nil, fmt.Errorf("db error: %v", err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(foundUser.Hash), []byte(password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(foundUser.Hash), []byte(req.Password)); err != nil {
 		return nil, fmt.Errorf("invalid password: %v", err)
 	}
 	return &foundUser, nil
@@ -101,22 +101,51 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, st
 
 }
 
-func (s *service) UpdateUser(userID primitive.ObjectID, user *data.User) (*data.User, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	var userToUpdate data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&userToUpdate)
+
+	updateFields := bson.M{}
+	if user.Username != "" {
+		updateFields["username"] = user.Username
+	}
+	if user.Email != "" {
+		updateFields["email"] = user.Email
+	}
+	if user.FirstName != "" {
+		updateFields["firstName"] = user.FirstName
+	}
+	if user.LastName != "" {
+		updateFields["lastName"] = user.LastName
+	}
+	if user.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("password hashing failed: %w", err)
+		}
+		updateFields["password"] = hashedPassword
+	}
+
+	if len(updateFields) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var updatedUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": userID},
+		bson.M{"$set": updateFields},
+		opts,
+	).Decode(&updatedUser)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found: %v", err)
+			return nil, fmt.Errorf("user not found: %w", err)
 		}
-		return nil, fmt.Errorf("db error: %v", err)
+		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	_, err = s.db.Database("gordian").Collection("users").UpdateOne(ctx, bson.M{"_id": userID}, bson.M{"$set": bson.M{"username": user.Username, "email": user.Email, "firstName": user.FirstName, "lastName": user.LastName}})
-	if err != nil {
-		return nil, fmt.Errorf("failed to update user: %v", err)
-	}
-	return user, nil
+
+	return &updatedUser, nil
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (string, string, error) {
@@ -181,13 +210,13 @@ func (s *service) ValidateToken(authHeader string) (primitive.ObjectID, error) {
 }
 
 func (s *service) Health() (map[string]string, error) {
-	/*ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	err := s.db.Ping(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("db down: %v", err)
-	}*/
+	}
 
 	return map[string]string{"message": "It's healthy"}, nil
 }
