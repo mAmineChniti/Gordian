@@ -59,12 +59,16 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.Use(middleware.Recover())
 
 	//e.GET("/api/v1", s.Docs)
+	e.GET("/", func(c echo.Context) error {
+		return c.Redirect(http.StatusMovedPermanently, "/api/v1")
+	})
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
 	e.GET("/api/v1/protected", s.ProtectedHandler, s.JWTMiddleware())
+	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
 	e.POST("/api/v1/refresh", s.RefreshTokenHandler)
 
 	return e
@@ -124,7 +128,7 @@ func (s *Server) Register(c echo.Context) error {
 	user, accessToken, refreshToken, err := s.db.CreateUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to create session"})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -171,6 +175,21 @@ func (s *Server) Update(c echo.Context) error {
 		"message": "User updated successfully",
 		"user":    updatedUser,
 	})
+}
+
+func (s *Server) Delete(c echo.Context) error {
+	userID, ok := c.Get("userID").(primitive.ObjectID)
+	if !ok {
+
+		c.Logger().Error("Invalid user ID in context")
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+	}
+	err := s.db.DeleteUser(userID)
+	if err != nil {
+		c.Logger().Error("DeleteUser error:", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error: couldn't delete user"})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "User deleted successfully"})
 }
 
 func (s *Server) healthHandler(c echo.Context) error {
