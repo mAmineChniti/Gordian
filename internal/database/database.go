@@ -24,6 +24,7 @@ type Service interface {
 	FindUser(user *data.LoginRequest) (*data.User, error)
 	CreateUser(user *data.RegisterRequest) (*data.User, string, string, error)
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
+	DeleteUser(userID primitive.ObjectID) error
 	CreateSession(userID primitive.ObjectID) (string, string, error)
 	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
@@ -113,17 +114,17 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 		updateFields["email"] = user.Email
 	}
 	if user.FirstName != "" {
-		updateFields["firstName"] = user.FirstName
+		updateFields["first_name"] = user.FirstName
 	}
 	if user.LastName != "" {
-		updateFields["lastName"] = user.LastName
+		updateFields["last_name"] = user.LastName
 	}
 	if user.Password != "" {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return nil, fmt.Errorf("password hashing failed: %w", err)
 		}
-		updateFields["password"] = hashedPassword
+		updateFields["hash"] = hashedPassword
 	}
 
 	if len(updateFields) == 0 {
@@ -146,6 +147,18 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 	}
 
 	return &updatedUser, nil
+}
+
+func (s *service) DeleteUser(userID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := s.db.Database("gordian").Collection("users").DeleteOne(ctx, bson.M{"_id": userID})
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %v", err)
+	}
+
+	return nil
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (string, string, error) {
