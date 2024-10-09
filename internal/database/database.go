@@ -22,10 +22,10 @@ import (
 type Service interface {
 	Health() (map[string]string, error)
 	FindUser(user *data.LoginRequest) (*data.User, error)
-	CreateUser(user *data.RegisterRequest) (*data.User, string, string, error)
+	CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error)
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
-	CreateSession(userID primitive.ObjectID) (string, string, error)
+	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
 	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
 
@@ -66,20 +66,20 @@ func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 	return &foundUser, nil
 }
 
-func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, string, error) {
+func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	filter := bson.M{"$or": []bson.M{{"username": user.Username}, {"email": user.Email}}}
 	foundUser, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, filter)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to check if user exists: %v", err)
+		return nil, nil, fmt.Errorf("failed to check if user exists: %v", err)
 	}
 	if foundUser > 0 {
-		return nil, "", "", fmt.Errorf("user already exists")
+		return nil, nil, fmt.Errorf("user already exists")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to hash password: %v", err)
+		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
 	}
 	endUser := data.User{
 		ID:         primitive.NewObjectID(),
@@ -92,13 +92,13 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, string, st
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to insert user: %v", err)
+		return nil, nil, fmt.Errorf("failed to insert user: %v", err)
 	}
-	accessToken, refreshToken, err := s.CreateSession(endUser.ID)
+	tokens, err := s.CreateSession(endUser.ID)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("failed to create session: %v", err)
+		return nil, nil, fmt.Errorf("failed to create session: %v", err)
 	}
-	return &endUser, accessToken, refreshToken, nil
+	return &endUser, tokens, nil
 
 }
 
@@ -161,34 +161,43 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 	return nil
 }
 
-func (s *service) CreateSession(userID primitive.ObjectID) (string, string, error) {
+func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
 	accessExpirationTime := time.Now().Add(15 * time.Minute)
+	accessCreatedAt := time.Now()
 	accessClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
 		ExpiresAt: jwt.NewNumericDate(accessExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		IssuedAt:  jwt.NewNumericDate(accessCreatedAt),
 	}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
 	accessTokenString, err := accessToken.SignedString(jwtSecret)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create access JWT token: %v", err)
+		return &data.SessionTokens{}, fmt.Errorf("failed to create access JWT token: %v", err)
 	}
 
 	refreshExpirationTime := time.Now().Add(7 * 24 * time.Hour)
+	refreshCreatedAt := time.Now()
 	refreshClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
 		ExpiresAt: jwt.NewNumericDate(refreshExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		IssuedAt:  jwt.NewNumericDate(refreshCreatedAt),
 	}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
 	refreshTokenString, err := refreshToken.SignedString(jwtSecret)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create refresh JWT token: %v", err)
+		return &data.SessionTokens{}, fmt.Errorf("failed to create refresh JWT token: %v", err)
 	}
 
-	return accessTokenString, refreshTokenString, nil
+	return &data.SessionTokens{
+		AccessToken:      accessTokenString,
+		AccessCreatedAt:  accessCreatedAt,
+		AccessExpiresAt:  accessExpirationTime,
+		RefreshToken:     refreshTokenString,
+		RefreshCreatedAt: refreshCreatedAt,
+		RefreshExpiresAt: refreshExpirationTime,
+	}, nil
 }
 
 func (s *service) ValidateToken(authHeader string) (primitive.ObjectID, error) {

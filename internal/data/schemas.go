@@ -35,3 +35,12 @@ type UpdateRequest struct {
 	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=3"`
 	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=3"`
 }
+
+type SessionTokens struct {
+	AccessToken      string    `json:"access_token"`
+	AccessCreatedAt  time.Time `json:"access_created_at"`
+	AccessExpiresAt  time.Time `json:"access_expires_at"`
+	RefreshToken     string    `json:"refresh_token"`
+	RefreshCreatedAt time.Time `json:"refresh_created_at"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
+}
