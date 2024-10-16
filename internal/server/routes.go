@@ -8,13 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v5"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -70,7 +68,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
-	e.POST("/api/v1/refresh", s.RefreshTokenHandler)
+	e.POST("/api/v1/refresh", s.RefreshTokenHandler, s.JWTMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
 	return e
 }
@@ -205,28 +203,15 @@ func (s *Server) Delete(c echo.Context) error {
 }
 
 func (s *Server) RefreshTokenHandler(c echo.Context) error {
-	var refreshTokenRequest struct {
-		RefreshToken string `json:"refresh_token"`
+	authHeader := c.Request().Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
 	}
+	userID, err := s.db.ValidateToken(authHeader)
 
-	if err := c.Bind(&refreshTokenRequest); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
-	}
-
-	claims := &jwt.RegisteredClaims{}
-	token, err := jwt.ParseWithClaims(refreshTokenRequest.RefreshToken, claims, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired refresh token"})
-	}
-
-	userID, err := primitive.ObjectIDFromHex(claims.Subject)
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user ID in token"})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
 	}
 
 	tokens, err := s.db.CreateSession(userID)
