@@ -102,14 +102,7 @@ func (s *Server) Login(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to create session"})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":            "Login successful",
-		"user":               user,
-		"access_token":       tokens.AccessToken,
-		"expires_at":         tokens.AccessExpiresAt,
-		"refresh_token":      tokens.RefreshToken,
-		"refresh_expires_at": tokens.RefreshExpiresAt,
-	})
+	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Login successful", User: user, Tokens: tokens})
 }
 
 func (s *Server) Register(c echo.Context) error {
@@ -132,14 +125,7 @@ func (s *Server) Register(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":            "User created successfully",
-		"user":               user,
-		"access_token":       tokens.AccessToken,
-		"expires_at":         tokens.AccessExpiresAt,
-		"refresh_token":      tokens.RefreshToken,
-		"refresh_expires_at": tokens.RefreshExpiresAt,
-	})
+	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
 }
 
 func (s *Server) Update(c echo.Context) error {
@@ -220,13 +206,7 @@ func (s *Server) RefreshTokenHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to generate new access token"})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":            "Token refreshed successfully",
-		"access_token":       tokens.AccessToken,
-		"expires_at":         tokens.AccessExpiresAt,
-		"refresh_token":      tokens.RefreshToken,
-		"refresh_expires_at": tokens.RefreshExpiresAt,
-	})
+	return c.JSON(http.StatusOK, data.TokenResponse{Message: "Token refreshed successfully", Tokens: tokens})
 }
 
 func (s *Server) healthHandler(c echo.Context) error {

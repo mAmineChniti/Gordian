@@ -44,3 +44,14 @@ type SessionTokens struct {
 	RefreshCreatedAt time.Time `json:"refresh_created_at"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 }
+
+type TokenResponse struct {
+	Message string         `json:"message"`
+	Tokens  *SessionTokens `json:"tokens"`
+}
+
+type LoginRegisterResponse struct {
+	Message string         `json:"message"`
+	User    *User          `json:"user"`
+	Tokens  *SessionTokens `json:"tokens"`
+}
