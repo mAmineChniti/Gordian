@@ -122,6 +122,9 @@ func (s *Server) Register(c echo.Context) error {
 	user, tokens, err := s.db.CreateUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
+		if strings.Contains(err.Error(), "failed to hash password") {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 
@@ -151,7 +154,7 @@ func (s *Server) Update(c echo.Context) error {
 
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
 	}
 
 	updatedUser, err := s.db.UpdateUser(userID, &req)
@@ -178,7 +181,7 @@ func (s *Server) Delete(c echo.Context) error {
 
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
 	}
 	err = s.db.DeleteUser(userID)
 	if err != nil {
@@ -197,7 +200,7 @@ func (s *Server) RefreshTokenHandler(c echo.Context) error {
 
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
 	}
 
 	tokens, err := s.db.CreateSession(userID)
