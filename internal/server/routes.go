@@ -68,7 +68,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
-	e.POST("/api/v1/refresh", s.RefreshTokenHandler, s.JWTMiddleware())
+	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.JWTMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
 	return e
 }
@@ -125,7 +125,7 @@ func (s *Server) Register(c echo.Context) error {
 		if strings.Contains(err.Error(), "failed to hash password") {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": err.Error()})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "err here"})
 	}
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
