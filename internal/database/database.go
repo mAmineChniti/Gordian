@@ -77,7 +77,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 	if foundUser > 0 {
 		return nil, nil, fmt.Errorf("user already exists")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.MaxCost)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
 	}
@@ -120,7 +120,7 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 		updateFields["last_name"] = user.LastName
 	}
 	if user.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.MaxCost)
 		if err != nil {
 			return nil, fmt.Errorf("password hashing failed: %w", err)
 		}
