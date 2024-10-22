@@ -162,7 +162,7 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
-	accessExpirationTime := time.Now().Add(15 * time.Minute)
+	accessExpirationTime := time.Now().Add(7 * 24 * time.Hour)
 	accessCreatedAt := time.Now()
 	accessClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
