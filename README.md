@@ -4,7 +4,7 @@ This is the API documentation for the Gordian API. The API is a RESTful API that
 
 ## Base URL
 
-`https://TBD/api/v1`
+`https://gordian.onrender.com/api/v1`
 
 ## Authentication
 
