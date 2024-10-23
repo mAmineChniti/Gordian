@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -25,23 +24,33 @@ func DEBUG(e *echo.Echo) {
 	if debug {
 		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
 			if reqBody != nil {
-				formattedReq := json.RawMessage(reqBody)
-				reqBodyJson, err := json.MarshalIndent(formattedReq, "", "  ")
-				if err != nil {
-					log.Printf("Request Body: \n%s\n", string(reqBody))
-					c.Logger().Error(err.Error())
+				var formattedReq interface{}
+				if err := json.Unmarshal(reqBody, &formattedReq); err != nil {
+					log.Printf("Request Body (raw): \n%s\n", string(reqBody))
+					c.Logger().Error("Error parsing request body: " + err.Error())
 				} else {
-					fmt.Printf("Request Body: \n%s\n", string(reqBodyJson))
+					reqBodyJson, err := json.MarshalIndent(formattedReq, "", "  ")
+					if err != nil {
+						log.Printf("Request Body (raw): \n%s\n", string(reqBody))
+						c.Logger().Error("Error marshaling request body: " + err.Error())
+					} else {
+						c.Logger().Debug("Request Body:\n" + string(reqBodyJson))
+					}
 				}
 			}
 			if resBody != nil {
-				formattedRes := json.RawMessage(resBody)
-				resBodyJson, err := json.MarshalIndent(formattedRes, "", "  ")
-				if err != nil {
-					log.Printf("Response Body: \n%s\n", string(resBody))
-					c.Logger().Error(err.Error())
+				var formattedRes interface{}
+				if err := json.Unmarshal(resBody, &formattedRes); err != nil {
+					log.Printf("Response Body (raw): \n%s\n", string(resBody))
+					c.Logger().Error("Error parsing response body: " + err.Error())
 				} else {
-					fmt.Printf("Response Body: \n%s\n", string(resBodyJson))
+					resBodyJson, err := json.MarshalIndent(formattedRes, "", "  ")
+					if err != nil {
+						log.Printf("Response Body (raw): \n%s\n", string(resBody))
+						c.Logger().Error("Error marshaling response body: " + err.Error())
+					} else {
+						c.Logger().Debug("Response Body:\n" + string(resBodyJson))
+					}
 				}
 			}
 		}))
