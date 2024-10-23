@@ -38,7 +38,7 @@ func DEBUG(e *echo.Echo) {
 					}
 				}
 			} else {
-				c.Logger().Warn("Request Body is empty.")
+				c.Logger().Info("Request Body is empty.")
 			}
 
 			if len(resBody) > 0 {
