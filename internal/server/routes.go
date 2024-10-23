@@ -56,7 +56,7 @@ func DEBUG(e *echo.Echo) {
 					}
 				}
 			} else {
-				c.Logger().Warn("Response Body is empty.")
+				c.Logger().Info("Response Body is empty.")
 			}
 		}))
 	}
