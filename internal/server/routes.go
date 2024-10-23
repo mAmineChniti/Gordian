@@ -23,7 +23,7 @@ var (
 func DEBUG(e *echo.Echo) {
 	if debug {
 		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
-			if reqBody != nil {
+			if len(reqBody) > 0 {
 				var formattedReq interface{}
 				if err := json.Unmarshal(reqBody, &formattedReq); err != nil {
 					log.Printf("Request Body (raw): \n%s\n", string(reqBody))
@@ -37,8 +37,11 @@ func DEBUG(e *echo.Echo) {
 						c.Logger().Debug("Request Body:\n" + string(reqBodyJson))
 					}
 				}
+			} else {
+				c.Logger().Warn("Request Body is empty.")
 			}
-			if resBody != nil {
+
+			if len(resBody) > 0 {
 				var formattedRes interface{}
 				if err := json.Unmarshal(resBody, &formattedRes); err != nil {
 					log.Printf("Response Body (raw): \n%s\n", string(resBody))
@@ -52,6 +55,8 @@ func DEBUG(e *echo.Echo) {
 						c.Logger().Debug("Response Body:\n" + string(resBodyJson))
 					}
 				}
+			} else {
+				c.Logger().Warn("Response Body is empty.")
 			}
 		}))
 	}
