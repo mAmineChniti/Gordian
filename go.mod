@@ -4,7 +4,7 @@ go 1.23.2
 
 require (
 	github.com/joho/godotenv v1.5.1
-	github.com/labstack/echo/v4 v4.12.0
+	github.com/labstack/echo/v4 v4.13.0
 	go.mongodb.org/mongo-driver v1.17.1
 	golang.org/x/crypto v0.29.0
 )
@@ -21,7 +21,6 @@ require (
 
 require (
 	github.com/go-playground/validator/v10 v10.23.0
-	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/klauspost/compress v1.17.10 // indirect
 	github.com/labstack/echo-jwt/v4 v4.2.0
