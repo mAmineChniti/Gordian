@@ -22,8 +22,8 @@ github.com/klauspost/compress v1.17.10 h1:oXAz+Vh0PMUvJczoi+flxpnBEPxoER1IaAnU/N
 github.com/klauspost/compress v1.17.10/go.mod h1:pMDklpSncoRMuLFrf1W9Ss9KT+0rH90U12bZKk7uwG0=
 github.com/labstack/echo-jwt/v4 v4.3.0 h1:8JcvVCrK9dRkPx/aWY3ZempZLO336Bebh4oAtBcxAv4=
 github.com/labstack/echo-jwt/v4 v4.3.0/go.mod h1:OlWm3wqfnq3Ma8DLmmH7GiEAz2S7Bj23im2iPMEAR+Q=
-github.com/labstack/echo/v4 v4.13.0 h1:8DjSi4H/k+RqoOmwXkxW14A2H1pdPdS95+qmdJ4q1Tg=
-github.com/labstack/echo/v4 v4.13.0/go.mod h1:61j7WN2+bp8V21qerqRs4yVlVTGyOagMBpF0vE7VcmM=
+github.com/labstack/echo/v4 v4.13.1 h1:q3+CpQlYhJwpRr9+08pX0IdlabTIpnIhrg2AKPSKhFE=
+github.com/labstack/echo/v4 v4.13.1/go.mod h1:61j7WN2+bp8V21qerqRs4yVlVTGyOagMBpF0vE7VcmM=
 github.com/labstack/gommon v0.4.2 h1:F8qTUNXgG1+6WQmqoUWnz8WiEU60mXVVw0P4ht1WRA0=
 github.com/labstack/gommon v0.4.2/go.mod h1:QlUFxVM+SNXhDL/Z7YhocGIBYOiwB0mXm1+1bAPHPyU=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
