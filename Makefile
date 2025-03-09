@@ -1,13 +1,11 @@
 # Simple Makefile for a Go project
 
 # Build the application
-all: build test
+all: build
 
 build:
 	@echo "Building..."
-	
-	
-	@go build -o main cmd/api/main.go
+	@CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o main cmd/api/main.go
 
 # Run the application
 run:

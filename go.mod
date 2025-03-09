@@ -1,4 +1,4 @@
-module Gordian
+module github.com/mAmineChniti/Gordian
 
 go 1.24.0
 
