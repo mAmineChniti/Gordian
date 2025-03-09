@@ -2,18 +2,31 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/mAmineChniti/Gordian/internal/data"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Service interface {
-	Health() map[string]string
+	Health() (map[string]string, error)
+	FindUser(user *data.LoginRequest) (*data.User, error)
+	CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error)
+	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
+	DeleteUser(userID primitive.ObjectID) error
+	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
+	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
 
 type service struct {
@@ -224,16 +237,14 @@ func (s *service) ValidateToken(authHeader string) (primitive.ObjectID, error) {
 	return userID, nil
 }
 
-func (s *service) Health() map[string]string {
+func (s *service) Health() (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	err := s.db.Ping(ctx, nil)
 	if err != nil {
-		log.Fatalf("db down: %v", err)
+		return nil, fmt.Errorf("db down: %v", err)
 	}
 
-	return map[string]string{
-		"message": "It's healthy",
-	}
+	return map[string]string{"message": "It's healthy"}, nil
 }
