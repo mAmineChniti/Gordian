@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"Gordian/internal/server"
+	"github.com/mAmineChniti/Gordian/internal/server"
 )
 
 func gracefulShutdown(apiServer *http.Server, done chan bool) {
