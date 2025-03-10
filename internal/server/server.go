@@ -21,7 +21,7 @@ type Server struct {
 func NewServer() *http.Server {
 	envPort := os.Getenv("PORT")
 	if envPort == "" {
-		envPort = "8080"
+		envPort = "10000"
 	}
 	port, _ := strconv.Atoi(envPort)
 	NewServer := &Server{
@@ -32,7 +32,7 @@ func NewServer() *http.Server {
 
 	// Declare Server config
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", NewServer.port),
+		Addr:         fmt.Sprintf("0.0.0.0:%d", NewServer.port),
 		Handler:      NewServer.RegisterRoutes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
