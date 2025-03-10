@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -83,7 +83,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 	if foundUser > 0 {
 		return nil, nil, fmt.Errorf("user already exists")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.MaxCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
 	}
