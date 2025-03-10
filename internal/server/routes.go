@@ -45,9 +45,9 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
 	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.JWTMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
-
-	e.GET("/health", s.healthHandler)
-
+	e.RouteNotFound("/*", func(c echo.Context) error {
+		return c.JSON(http.StatusNotFound, map[string]string{"message": "Not found"})
+	})
 	return e
 }
 
@@ -93,6 +93,7 @@ func DEBUG(e *echo.Echo) {
 		}))
 	}
 }
+
 func (s *Server) Login(c echo.Context) error {
 	var req data.LoginRequest
 	if err := c.Bind(&req); err != nil {
@@ -145,7 +146,7 @@ func (s *Server) Register(c echo.Context) error {
 		if strings.Contains(err.Error(), "failed to hash password") {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "err here"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 	}
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
