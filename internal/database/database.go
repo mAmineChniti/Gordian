@@ -59,16 +59,24 @@ func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"username": req.Username}).Decode(&foundUser)
+	filter := bson.M{"username": req.Identifier}
+
+	if strings.Contains(req.Identifier, "@") {
+		filter = bson.M{"email": req.Identifier}
+	}
+
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, filter).Decode(&foundUser)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("user not found: %v", err)
 		}
 		return nil, fmt.Errorf("db error: %v", err)
 	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(foundUser.Hash), []byte(req.Password)); err != nil {
 		return nil, fmt.Errorf("invalid password: %v", err)
 	}
+
 	return &foundUser, nil
 }
 
