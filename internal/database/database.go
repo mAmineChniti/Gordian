@@ -22,6 +22,7 @@ import (
 type Service interface {
 	Health() (map[string]string, error)
 	FindUser(user *data.LoginRequest) (*data.User, error)
+	GetUser(userID primitive.ObjectID) (*data.User, error)
 	CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error)
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
@@ -75,6 +76,22 @@ func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(foundUser.Hash), []byte(req.Password)); err != nil {
 		return nil, fmt.Errorf("invalid password: %v", err)
+	}
+
+	return &foundUser, nil
+}
+
+func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var foundUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&foundUser)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("user not found: %v", err)
+		}
+		return nil, fmt.Errorf("db error: %v", err)
 	}
 
 	return &foundUser, nil
