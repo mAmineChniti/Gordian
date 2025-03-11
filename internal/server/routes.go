@@ -40,6 +40,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	})
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
+	e.GET("/api/v1/fetchuser", s.FetchUser, s.JWTMiddleware())
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
@@ -150,6 +151,23 @@ func (s *Server) Register(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
+}
+
+func (s *Server) FetchUser(c echo.Context) error {
+	authHeader := c.Request().Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
+	}
+	userID, err := s.db.ValidateToken(authHeader)
+	user, err := s.db.GetUser(userID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
+		}
+		c.Logger().Error("GetUser error:", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"message": "User fetched successfully", "user": user})
 }
 
 func (s *Server) Update(c echo.Context) error {
