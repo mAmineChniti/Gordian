@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -41,6 +42,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
 	e.GET("/api/v1/fetchuser", s.FetchUser, s.JWTMiddleware())
+	e.POST("/api/v1/fetchuserbyid", s.FetchUserById)
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
@@ -168,6 +170,46 @@ func (s *Server) FetchUser(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"message": "User fetched successfully", "user": user})
+}
+
+func (s *Server) FetchUserById(c echo.Context) error {
+	var req struct {
+		ID string `json:"id" validate:"required"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Error("Bind error: ", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+	}
+
+	validationErrors, err := data.ValidateStruct(req)
+	if err != nil {
+		c.Logger().Errorf("Validation error: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"message": "Validation failed",
+			"errors":  validationErrors,
+		})
+	}
+
+	objID, err := primitive.ObjectIDFromHex(req.ID)
+	if err != nil {
+		c.Logger().Error("Invalid ObjectID:", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid user ID format"})
+	}
+
+	user, err := s.db.GetUser(objID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
+		}
+		c.Logger().Errorf("GetUser error: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "User fetched successfully",
+		"user":    user,
+	})
 }
 
 func (s *Server) Update(c echo.Context) error {
