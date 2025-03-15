@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
@@ -42,7 +43,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
 	e.GET("/api/v1/fetchuser", s.FetchUser, s.JWTMiddleware())
-	e.POST("/api/v1/fetchuserbyid", s.FetchUserById)
+	e.POST("/api/v1/fetchuserbyid", s.FetchUserById, s.JWTMiddleware())
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
@@ -206,9 +207,21 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 	}
 
+	type UserResponse struct {
+		Username   string    `json:"username"`
+		FistName   string    `json:"first_name"`
+		LastName   string    `json:"last_name"`
+		DateJoined time.Time `json:"date_joined"`
+	}
+	response := UserResponse{
+		Username:   user.Username,
+		FistName:   user.FirstName,
+		LastName:   user.LastName,
+		DateJoined: user.DateJoined,
+	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"message": "User fetched successfully",
-		"user":    user,
+		"user":    response,
 	})
 }
 
