@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -47,7 +48,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
-	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.JWTMiddleware())
+	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
 	e.RouteNotFound("/*", func(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"message": "Not found"})
@@ -157,11 +158,7 @@ func (s *Server) Register(c echo.Context) error {
 }
 
 func (s *Server) FetchUser(c echo.Context) error {
-	authHeader := c.Request().Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
-	}
-	userID, err := s.db.ValidateToken(authHeader)
+	userID := c.Get("user_id").(primitive.ObjectID)
 	user, err := s.db.GetUser(userID)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -175,7 +172,7 @@ func (s *Server) FetchUser(c echo.Context) error {
 
 func (s *Server) FetchUserById(c echo.Context) error {
 	var req struct {
-		ID string `json:"id" validate:"required"`
+		ID string `json:"user_id" validate:"required"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -240,17 +237,7 @@ func (s *Server) Update(c echo.Context) error {
 			"errors":  validationErrors,
 		})
 	}
-	authHeader := c.Request().Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
-	}
-	userID, err := s.db.ValidateToken(authHeader)
-
-	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
-	}
-
+	userID := c.Get("user_id").(primitive.ObjectID)
 	updatedUser, err := s.db.UpdateUser(userID, &req)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -267,17 +254,8 @@ func (s *Server) Update(c echo.Context) error {
 }
 
 func (s *Server) Delete(c echo.Context) error {
-	authHeader := c.Request().Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
-	}
-	userID, err := s.db.ValidateToken(authHeader)
-
-	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
-	}
-	err = s.db.DeleteUser(userID)
+	userID := c.Get("user_id").(primitive.ObjectID)
+	err := s.db.DeleteUser(userID)
 	if err != nil {
 		c.Logger().Error("DeleteUser error:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error: couldn't delete user"})
@@ -286,18 +264,8 @@ func (s *Server) Delete(c echo.Context) error {
 }
 
 func (s *Server) RefreshTokenHandler(c echo.Context) error {
-	authHeader := c.Request().Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
-	}
-	userID, err := s.db.ValidateToken(authHeader)
-
-	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized invalid token"})
-	}
-
-	tokens, err := s.db.CreateSession(userID)
+	userId := c.Get("user_id").(primitive.ObjectID)
+	tokens, err := s.db.CreateSession(userId)
 	if err != nil {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to generate new access token"})
@@ -317,13 +285,70 @@ func (s *Server) healthHandler(c echo.Context) error {
 
 func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 	return echojwt.WithConfig(echojwt.Config{
-		SigningKey: jwtSecret,
+		SigningKey:    jwtSecret,
+		SigningMethod: "HS256",
+		TokenLookup:   "header:Authorization",
 		ErrorHandler: func(c echo.Context, err error) error {
 			if errors.Is(err, echojwt.ErrJWTMissing) {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Missing or malformed token"})
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Authorization header missing"})
+			}
+			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired token"})
+		},
+		SuccessHandler: func(c echo.Context) {
+			token := c.Get("user").(*jwt.Token)
+			claims := token.Claims.(jwt.MapClaims)
+
+			if claims["jti"] != "access" {
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
+					c.Logger().Error("Failed to send response:", err)
+				}
+				return
 			}
 
+			userID, err := primitive.ObjectIDFromHex(claims["sub"].(string))
+			if err != nil {
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
+					c.Logger().Error("Failed to send response:", err)
+				}
+				return
+			}
+
+			c.Set("user_id", userID)
+		},
+	})
+}
+
+func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
+	return echojwt.WithConfig(echojwt.Config{
+		SigningKey:    jwtSecret,
+		SigningMethod: "HS256",
+		TokenLookup:   "header:Authorization",
+		ErrorHandler: func(c echo.Context, err error) error {
+			if errors.Is(err, echojwt.ErrJWTMissing) {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Authorization header missing"})
+			}
 			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired token"})
+		},
+		SuccessHandler: func(c echo.Context) {
+			token := c.Get("user").(*jwt.Token)
+			claims := token.Claims.(jwt.MapClaims)
+
+			if claims["jti"] != "refresh" {
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
+					c.Logger().Error("Failed to send response:", err)
+				}
+				return
+			}
+
+			userID, err := primitive.ObjectIDFromHex(claims["sub"].(string))
+			if err != nil {
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
+					c.Logger().Error("Failed to send response:", err)
+				}
+				return
+			}
+
+			c.Set("user_id", userID)
 		},
 	})
 }
