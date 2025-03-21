@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -27,7 +26,6 @@ type Service interface {
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
 	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
-	ValidateToken(tokenString string) (primitive.ObjectID, error)
 }
 
 type service struct {
@@ -193,73 +191,38 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
-	accessExpirationTime := time.Now().Add(7 * 24 * time.Hour)
-	accessCreatedAt := time.Now()
+	accessExpirationTime := time.Now().Add(15 * time.Minute)
 	accessClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
 		ExpiresAt: jwt.NewNumericDate(accessExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(accessCreatedAt),
-	}
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ID:        "access"}
 
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
 	accessTokenString, err := accessToken.SignedString(jwtSecret)
 	if err != nil {
-		return &data.SessionTokens{}, fmt.Errorf("failed to create access JWT token: %v", err)
+		return nil, fmt.Errorf("failed to create access token: %w", err)
 	}
 
 	refreshExpirationTime := time.Now().Add(7 * 24 * time.Hour)
-	refreshCreatedAt := time.Now()
 	refreshClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
 		ExpiresAt: jwt.NewNumericDate(refreshExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(refreshCreatedAt),
-	}
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ID:        "refresh"}
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
 	refreshTokenString, err := refreshToken.SignedString(jwtSecret)
 	if err != nil {
-		return &data.SessionTokens{}, fmt.Errorf("failed to create refresh JWT token: %v", err)
+		return nil, fmt.Errorf("failed to create refresh token: %w", err)
 	}
 
 	return &data.SessionTokens{
 		AccessToken:      accessTokenString,
-		AccessCreatedAt:  accessCreatedAt,
 		AccessExpiresAt:  accessExpirationTime,
 		RefreshToken:     refreshTokenString,
-		RefreshCreatedAt: refreshCreatedAt,
 		RefreshExpiresAt: refreshExpirationTime,
 	}, nil
-}
-
-func (s *service) ValidateToken(authHeader string) (primitive.ObjectID, error) {
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return primitive.ObjectID{}, fmt.Errorf("invalid token format")
-	}
-
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-	claims := &jwt.RegisteredClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		return jwtSecret, nil
-	})
-
-	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			return primitive.ObjectID{}, fmt.Errorf("token expired: %v", err)
-		}
-		return primitive.ObjectID{}, fmt.Errorf("invalid token: %v", err)
-	}
-
-	if !token.Valid {
-		return primitive.ObjectID{}, fmt.Errorf("invalid token")
-	}
-
-	userID, err := primitive.ObjectIDFromHex(claims.Subject)
-	if err != nil {
-		return primitive.ObjectID{}, fmt.Errorf("invalid user ID: %v", err)
-	}
-
-	return userID, nil
 }
 
 func (s *service) Health() (map[string]string, error) {
