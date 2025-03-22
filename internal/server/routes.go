@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v5"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -295,21 +295,26 @@ func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired token"})
 		},
 		SuccessHandler: func(c echo.Context) {
-			token := c.Get("user").(*jwt.Token)
-			claims := token.Claims.(jwt.MapClaims)
-
-			if claims["jti"] != "access" {
-				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
-					c.Logger().Error("Failed to send response:", err)
-				}
+			token, ok := c.Get("user").(*jwt.Token)
+			if !ok {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"})
 				return
 			}
 
-			userID, err := primitive.ObjectIDFromHex(claims["sub"].(string))
+			claims, ok := token.Claims.(*jwt.RegisteredClaims)
+			if !ok {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
+				return
+			}
+
+			if claims.ID != "access" {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"})
+				return
+			}
+
+			userID, err := primitive.ObjectIDFromHex(claims.Subject)
 			if err != nil {
-				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
-					c.Logger().Error("Failed to send response:", err)
-				}
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"})
 				return
 			}
 
@@ -330,21 +335,26 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired token"})
 		},
 		SuccessHandler: func(c echo.Context) {
-			token := c.Get("user").(*jwt.Token)
-			claims := token.Claims.(jwt.MapClaims)
-
-			if claims["jti"] != "refresh" {
-				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
-					c.Logger().Error("Failed to send response:", err)
-				}
+			token, ok := c.Get("user").(*jwt.Token)
+			if !ok {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"})
 				return
 			}
 
-			userID, err := primitive.ObjectIDFromHex(claims["sub"].(string))
+			claims, ok := token.Claims.(*jwt.RegisteredClaims)
+			if !ok {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
+				return
+			}
+
+			if claims.ID != "refresh" {
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"})
+				return
+			}
+
+			userID, err := primitive.ObjectIDFromHex(claims.Subject)
 			if err != nil {
-				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
-					c.Logger().Error("Failed to send response:", err)
-				}
+				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"})
 				return
 			}
 
