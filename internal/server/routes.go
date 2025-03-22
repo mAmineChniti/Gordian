@@ -297,24 +297,32 @@ func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 		SuccessHandler: func(c echo.Context) {
 			token, ok := c.Get("user").(*jwt.Token)
 			if !ok {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			claims, ok := token.Claims.(*jwt.RegisteredClaims)
 			if !ok {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			if claims.ID != "access" {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			userID, err := primitive.ObjectIDFromHex(claims.Subject)
 			if err != nil {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
@@ -337,24 +345,32 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 		SuccessHandler: func(c echo.Context) {
 			token, ok := c.Get("user").(*jwt.Token)
 			if !ok {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Token not found"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			claims, ok := token.Claims.(*jwt.RegisteredClaims)
 			if !ok {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			if claims.ID != "refresh" {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
 			userID, err := primitive.ObjectIDFromHex(claims.Subject)
 			if err != nil {
-				c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"})
+				if err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user in token"}); err != nil {
+					c.Logger().Error("failed to send response: ", err)
+				}
 				return
 			}
 
