@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -274,6 +275,74 @@ func (s *Server) RefreshTokenHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, data.TokenResponse{Message: "Token refreshed successfully", Tokens: tokens})
 }
 
+func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
+	config := echojwt.Config{
+		SigningKey: jwtSecret,
+		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
+			claims := &jwt.RegisteredClaims{}
+			token, err := jwt.ParseWithClaims(auth, claims, func(t *jwt.Token) (any, error) {
+				return jwtSecret, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			if !token.Valid {
+				return nil, errors.New("invalid token")
+			}
+			if claims.ID != "access" {
+				return nil, errors.New("invalid token type")
+			}
+			userID, err := primitive.ObjectIDFromHex(claims.Subject)
+			if err != nil {
+				return nil, fmt.Errorf("invalid user ID: %v", err)
+			}
+			c.Set("user_id", userID)
+			return token, nil
+		},
+		TokenLookup: "header:Authorization",
+		ErrorHandler: func(c echo.Context, err error) error {
+			return c.JSON(http.StatusUnauthorized, map[string]string{
+				"message": fmt.Sprintf("Unauthorized: %v", err.Error()),
+			})
+		},
+	}
+	return echojwt.WithConfig(config)
+}
+
+func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
+	config := echojwt.Config{
+		SigningKey: jwtSecret,
+		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
+			claims := &jwt.RegisteredClaims{}
+			token, err := jwt.ParseWithClaims(auth, claims, func(t *jwt.Token) (any, error) {
+				return jwtSecret, nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			if !token.Valid {
+				return nil, errors.New("invalid token")
+			}
+			if claims.ID != "refresh" {
+				return nil, errors.New("invalid token type")
+			}
+			userID, err := primitive.ObjectIDFromHex(claims.Subject)
+			if err != nil {
+				return nil, fmt.Errorf("invalid user ID: %v", err)
+			}
+			c.Set("user_id", userID)
+			return token, nil
+		},
+		TokenLookup: "header:Authorization",
+		ErrorHandler: func(c echo.Context, err error) error {
+			return c.JSON(http.StatusUnauthorized, map[string]string{
+				"message": fmt.Sprintf("Unauthorized: %v", err.Error()),
+			})
+		},
+	}
+	return echojwt.WithConfig(config)
+}
+
 func (s *Server) healthHandler(c echo.Context) error {
 	health, err := s.db.Health()
 	if err != nil {
@@ -281,83 +350,4 @@ func (s *Server) healthHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
 	}
 	return c.JSON(http.StatusOK, health)
-}
-
-func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
-	return echojwt.WithConfig(echojwt.Config{
-		SigningKey:    jwtSecret,
-		SigningMethod: "HS256",
-		TokenLookup:   "header:Authorization",
-		ErrorHandler:  jwtErrorHandler,
-		SuccessHandler: func(c echo.Context) {
-			handleValidToken(c, "access")
-		},
-	})
-}
-
-func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
-	return echojwt.WithConfig(echojwt.Config{
-		SigningKey:    jwtSecret,
-		SigningMethod: "HS256",
-		TokenLookup:   "header:Authorization",
-		ErrorHandler:  jwtErrorHandler,
-		SuccessHandler: func(c echo.Context) {
-			handleValidToken(c, "refresh")
-		},
-	})
-}
-
-func jwtErrorHandler(c echo.Context, err error) error {
-	if errors.Is(err, echojwt.ErrJWTMissing) {
-		c.Logger().Error("Authorization header missing")
-		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Authorization header missing"})
-	}
-
-	c.Logger().Error("JWT invalid error:", err)
-	return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid or expired token"})
-}
-
-func handleValidToken(c echo.Context, expectedTokenType string) {
-	token, ok := c.Get("user").(*jwt.Token)
-	if !ok {
-		c.Logger().Error("Invalid token format")
-		err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token format"})
-		if err != nil {
-			c.Logger().Error("Error sending response:", err)
-		}
-		return
-	}
-
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
-	if !ok {
-		c.Logger().Error("Invalid token claims structure")
-		err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
-		if err != nil {
-			c.Logger().Error("Error sending response:", err)
-		}
-		return
-	}
-
-	c.Logger().Debugf("Token validation - Subject: %s, ID: %s, ExpiresAt: %v", claims.Subject, claims.ID, claims.ExpiresAt)
-
-	if claims.ID != expectedTokenType {
-		c.Logger().Warnf("Invalid token type: expected %s got %s", expectedTokenType, claims.ID)
-		err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token type"})
-		if err != nil {
-			c.Logger().Error("Error sending response:", err)
-		}
-		return
-	}
-
-	userID, err := primitive.ObjectIDFromHex(claims.Subject)
-	if err != nil {
-		c.Logger().Errorf("Invalid user ID format: %s", claims.Subject)
-		err := c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid user identifier"})
-		if err != nil {
-			c.Logger().Error("Error sending response:", err)
-		}
-		return
-	}
-
-	c.Set("user_id", userID)
 }

@@ -189,6 +189,7 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 
 	return nil
 }
+
 func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
 	now := time.Now()
 
