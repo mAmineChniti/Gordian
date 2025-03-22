@@ -189,39 +189,38 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 
 	return nil
 }
-
 func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
-	accessExpirationTime := time.Now().Add(15 * time.Minute)
+	now := time.Now()
+
 	accessClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(accessExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ID:        "access"}
-
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
-	accessTokenString, err := accessToken.SignedString(jwtSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create access token: %w", err)
+		ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ID:        "access",
 	}
 
-	refreshExpirationTime := time.Now().Add(7 * 24 * time.Hour)
 	refreshClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(refreshExpirationTime),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ID:        "refresh"}
+		ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ID:        "refresh",
+	}
 
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
-	refreshTokenString, err := refreshToken.SignedString(jwtSecret)
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(jwtSecret)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create refresh token: %w", err)
+		return nil, fmt.Errorf("access token creation failed: %w", err)
+	}
+
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString(jwtSecret)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token creation failed: %w", err)
 	}
 
 	return &data.SessionTokens{
-		AccessToken:      accessTokenString,
-		AccessExpiresAt:  accessExpirationTime,
-		RefreshToken:     refreshTokenString,
-		RefreshExpiresAt: refreshExpirationTime,
+		AccessToken:      accessToken,
+		AccessExpiresAt:  accessClaims.ExpiresAt.Time,
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: refreshClaims.ExpiresAt.Time,
 	}, nil
 }
 
