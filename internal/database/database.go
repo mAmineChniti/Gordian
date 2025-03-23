@@ -110,6 +110,12 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
 	}
+
+	birthdate, err := time.Parse("02/01/2006", user.Birthdate)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse birthdate: %v", err)
+	}
+
 	endUser := data.User{
 		ID:         primitive.NewObjectID(),
 		Username:   user.Username,
@@ -117,6 +123,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 		Hash:       string(hash),
 		FirstName:  user.FirstName,
 		LastName:   user.LastName,
+		Birthdate:  birthdate,
 		DateJoined: time.Now(),
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
@@ -154,6 +161,13 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 			return nil, fmt.Errorf("password hashing failed: %w", err)
 		}
 		updateFields["hash"] = hashedPassword
+	}
+	if user.Birthdate != "" {
+		birthdate, err := time.Parse("02/01/2006", user.Birthdate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse birthdate: %w", err)
+		}
+		updateFields["birthdate"] = birthdate
 	}
 
 	if len(updateFields) == 0 {

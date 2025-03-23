@@ -13,6 +13,7 @@ type User struct {
 	Hash       string             `json:"-" bson:"hash"`
 	FirstName  string             `json:"first_name" bson:"first_name"`
 	LastName   string             `json:"last_name" bson:"last_name"`
+	Birthdate  time.Time          `json:"birthdate" bson:"birthdate"`
 	DateJoined time.Time          `json:"date_joined" bson:"date_joined"`
 }
 
@@ -27,6 +28,7 @@ type RegisterRequest struct {
 	Password  string `json:"password" validate:"required,min=6"`
 	FirstName string `json:"first_name" validate:"required,min=3"`
 	LastName  string `json:"last_name" validate:"required,min=3"`
+	Birthdate string `json:"birthdate" validate:"required,birthdate"`
 }
 
 type UpdateRequest struct {
@@ -35,6 +37,7 @@ type UpdateRequest struct {
 	Password  string `json:"password,omitempty" validate:"omitempty,min=6"`
 	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=3"`
 	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=3"`
+	Birthdate string `json:"birthdate,omitempty" validate:"omitempty,birthdate"`
 }
 
 type SessionTokens struct {

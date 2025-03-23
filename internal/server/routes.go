@@ -106,12 +106,12 @@ func (s *Server) Login(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-	validationErrors, err := data.ValidateStruct(req)
+	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"message": "Validation failed",
-			"errors":  validationErrors,
+			"errors":  errorMsg,
 		})
 	}
 	user, err := s.db.FindUser(&req)
@@ -138,12 +138,12 @@ func (s *Server) Register(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
-	validationErrors, err := data.ValidateStruct(req)
+	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"message": "Validation failed",
-			"errors":  validationErrors,
+			"errors":  errorMsg,
 		})
 	}
 	user, tokens, err := s.db.CreateUser(&req)
@@ -181,12 +181,12 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
 
-	validationErrors, err := data.ValidateStruct(req)
+	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
 		c.Logger().Errorf("Validation error: %v", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"message": "Validation failed",
-			"errors":  validationErrors,
+			"errors":  errorMsg,
 		})
 	}
 
@@ -209,12 +209,14 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		Username   string    `json:"username"`
 		FistName   string    `json:"first_name"`
 		LastName   string    `json:"last_name"`
+		BirthDate  time.Time `json:"birthdate"`
 		DateJoined time.Time `json:"date_joined"`
 	}
 	response := UserResponse{
 		Username:   user.Username,
 		FistName:   user.FirstName,
 		LastName:   user.LastName,
+		BirthDate:  user.Birthdate,
 		DateJoined: user.DateJoined,
 	}
 	return c.JSON(http.StatusOK, map[string]any{
@@ -230,12 +232,12 @@ func (s *Server) Update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 
-	validationErrors, err := data.ValidateStruct(req)
+	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
 			"message": "Validation failed",
-			"errors":  validationErrors,
+			"errors":  errorMsg,
 		})
 	}
 	userID := c.Get("user_id").(primitive.ObjectID)
