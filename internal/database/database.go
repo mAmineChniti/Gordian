@@ -195,7 +195,7 @@ func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens,
 
 	accessClaims := &jwt.RegisteredClaims{
 		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+		ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
 		IssuedAt:  jwt.NewNumericDate(now),
 		ID:        "access",
 	}
