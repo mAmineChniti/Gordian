@@ -11,7 +11,10 @@ var validate *validator.Validate
 
 func init() {
 	validate = validator.New()
-	validate.RegisterValidation("birthdate", validateBirthdate)
+	err := validate.RegisterValidation("birthdate", validateBirthdate)
+	if err != nil {
+		return
+	}
 }
 
 func validateBirthdate(fl validator.FieldLevel) bool {
