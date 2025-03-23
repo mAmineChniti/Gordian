@@ -2,6 +2,7 @@ package data
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -11,9 +12,8 @@ var validate *validator.Validate
 
 func init() {
 	validate = validator.New()
-	err := validate.RegisterValidation("birthdate", validateBirthdate)
-	if err != nil {
-		return
+	if err := validate.RegisterValidation("birthdate", validateBirthdate); err != nil {
+		log.Fatalf("Failed to register birthdate validator: %v", err)
 	}
 }
 
@@ -23,7 +23,7 @@ func validateBirthdate(fl validator.FieldLevel) bool {
 		return false
 	}
 
-	birthdate, err := time.Parse("02/01/2006", dateStr)
+	birthdate, err := time.Parse(time.RFC3339, dateStr)
 	if err != nil {
 		return false
 	}
@@ -54,7 +54,7 @@ func ValidateStruct(s any) (string, error) {
 		if len(validationErrors) > 0 {
 			fieldErr := validationErrors[0]
 			if fieldErr.Tag() == "birthdate" {
-				return fmt.Sprintf("%s must be in dd/mm/yyyy format and user must be 18+ years old", fieldErr.Field()), fmt.Errorf("validation errors")
+				return fmt.Sprintf("%s must indicate a user who is 18+ years old", fieldErr.Field()), fmt.Errorf("validation errors")
 			} else {
 				return fmt.Sprintf("%s failed on '%s' tag", fieldErr.Field(), fieldErr.Tag()), fmt.Errorf("validation errors")
 			}
