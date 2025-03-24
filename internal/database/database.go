@@ -111,9 +111,9 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
 	}
 
-	birthdate, err := time.Parse("02/01/2006", user.Birthdate)
+	birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse birthdate: %v", err)
+		return nil, nil, fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
 	}
 
 	endUser := data.User{
@@ -135,7 +135,6 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 		return nil, nil, fmt.Errorf("failed to create session: %v", err)
 	}
 	return &endUser, tokens, nil
-
 }
 
 func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error) {
@@ -163,9 +162,9 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 		updateFields["hash"] = hashedPassword
 	}
 	if user.Birthdate != "" {
-		birthdate, err := time.Parse("02/01/2006", user.Birthdate)
+		birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse birthdate: %w", err)
+			return nil, fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
 		}
 		updateFields["birthdate"] = birthdate
 	}
