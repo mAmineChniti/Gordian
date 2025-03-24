@@ -163,7 +163,11 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 		updateFields["hash"] = hashedPassword
 	}
 	if user.Birthdate != "" {
-		updateFields["birthdate"] = user.Birthdate
+		birthdate, err := time.Parse("02/01/2006", user.Birthdate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse birthdate: %w", err)
+		}
+		updateFields["birthdate"] = birthdate
 	}
 
 	if len(updateFields) == 0 {
