@@ -24,11 +24,11 @@ type Service interface {
 	Health() (map[string]string, error)
 	FindUser(user *data.LoginRequest) (*data.User, error)
 	GetUser(userID primitive.ObjectID) (*data.User, error)
-	CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error)
+	CreateUser(user *data.RegisterRequest) error
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
 	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
-	ConfirmEmail(token string) error
+	ConfirmEmail(token string) (bool, string)
 	ResendConfirmationEmail(userID primitive.ObjectID) error
 	DeleteUnconfirmedUsers() error
 }
@@ -102,31 +102,30 @@ func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
 	return &foundUser, nil
 }
 
-func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error) {
+func (s *service) CreateUser(user *data.RegisterRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	filter := bson.M{"$or": []bson.M{{"username": user.Username}, {"email": user.Email}}}
 	foundUser, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, filter)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to check if user exists: %v", err)
+		return fmt.Errorf("failed to check if user exists: %v", err)
 	}
 	if foundUser > 0 {
-		return nil, nil, fmt.Errorf("user already exists")
+		return fmt.Errorf("user already exists")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to hash password: %v", err)
+		return fmt.Errorf("failed to hash password: %v", err)
 	}
 
 	birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
+		return fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
 	}
 
 	emailToken := uuid.New().String()
 
 	endUser := data.User{
-		ID:                        primitive.NewObjectID(),
 		Username:                  user.Username,
 		Email:                     user.Email,
 		Hash:                      string(hash),
@@ -141,18 +140,14 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to insert user: %v", err)
-	}
-	tokens, err := s.CreateSession(endUser.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create session: %v", err)
+		return fmt.Errorf("failed to insert user: %v", err)
 	}
 
 	if err := s.emailService.SendConfirmationEmail(endUser.Email, emailToken); err != nil {
-		return nil, nil, fmt.Errorf("failed to send confirmation email: %v", err)
+		return fmt.Errorf("failed to send confirmation email: %v", err)
 	}
 
-	return &endUser, tokens, nil
+	return nil
 }
 
 func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error) {
@@ -256,35 +251,40 @@ func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens,
 	}, nil
 }
 
-func (s *service) ConfirmEmail(token string) error {
+func (s *service) ConfirmEmail(token string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	filter := bson.M{"email_token": token}
+	var foundUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"email_token": token}).Decode(&foundUser)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return false, "Invalid or expired confirmation link"
+		}
+		return false, "An error occurred while confirming your email"
+	}
+
+	if foundUser.EmailConfirmed {
+		return false, "Email is already confirmed"
+	}
+
 	update := bson.M{
 		"$set": bson.M{
 			"email_confirmed": true,
 			"email_token":     "",
 		},
 	}
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
-
-	var updatedUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOneAndUpdate(
+	err = s.db.Database("gordian").Collection("users").FindOneAndUpdate(
 		ctx,
-		filter,
+		bson.M{"_id": foundUser.ID},
 		update,
-		opts,
-	).Decode(&updatedUser)
+	).Err()
 
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return fmt.Errorf("invalid or expired email confirmation token")
-		}
-		return fmt.Errorf("failed to confirm email: %w", err)
+		return false, "Failed to confirm email. Please try again."
 	}
 
-	return nil
+	return true, ""
 }
 
 func (s *service) ResendConfirmationEmail(userID primitive.ObjectID) error {

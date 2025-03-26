@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"html/template"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -152,7 +153,7 @@ func (s *Server) Register(c echo.Context) error {
 			"errors":  errorMsg,
 		})
 	}
-	user, tokens, err := s.db.CreateUser(&req)
+	err = s.db.CreateUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
 		if strings.Contains(err.Error(), "user already exists") {
@@ -167,13 +168,12 @@ func (s *Server) Register(c echo.Context) error {
 		if strings.Contains(err.Error(), "failed to send confirmation email") {
 			return c.JSON(http.StatusPartialContent, map[string]string{
 				"message": "Registration successful, but confirmation email could not be sent",
-				"user":    user.Username,
 			})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Registration failed"})
 	}
 
-	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
+	return c.JSON(http.StatusOK, map[string]string{"message": "Registration successful"})
 }
 
 func (s *Server) FetchUser(c echo.Context) error {
@@ -419,31 +419,35 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
 	if token == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"message": "Missing email confirmation token",
+		tmpl, err := template.ParseFiles("internal/templates/email_confirmation.html")
+		if err != nil {
+			c.Logger().Error("Template parsing error:", err)
+			return c.HTML(http.StatusInternalServerError, "Error rendering template")
+		}
+
+		return tmpl.Execute(c.Response().Writer, struct {
+			Success      bool
+			ErrorMessage string
+		}{
+			Success:      false,
+			ErrorMessage: "Missing email confirmation token",
 		})
 	}
 
-	err := s.db.ConfirmEmail(token)
+	success, errMsg := s.db.ConfirmEmail(token)
+
+	tmpl, err := template.ParseFiles("internal/templates/email_confirmation.html")
 	if err != nil {
-		c.Logger().Error("ConfirmEmail error:", err)
-		if strings.Contains(err.Error(), "invalid token") {
-			return c.JSON(http.StatusBadRequest, map[string]string{
-				"message": "Invalid or expired email confirmation token",
-			})
-		}
-		if strings.Contains(err.Error(), "already confirmed") {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"message": "Email is already confirmed",
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"message": "An error occurred during email confirmation",
-		})
+		c.Logger().Error("Template parsing error:", err)
+		return c.HTML(http.StatusInternalServerError, "Error rendering template")
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Email confirmed successfully",
+	return tmpl.Execute(c.Response().Writer, struct {
+		Success      bool
+		ErrorMessage string
+	}{
+		Success:      success,
+		ErrorMessage: errMsg,
 	})
 }
 

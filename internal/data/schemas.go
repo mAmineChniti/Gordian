@@ -15,7 +15,7 @@ type User struct {
 	LastName                  string             `json:"last_name" bson:"last_name"`
 	Birthdate                 time.Time          `json:"birthdate" bson:"birthdate"`
 	DateJoined                time.Time          `json:"date_joined" bson:"date_joined"`
-	EmailConfirmed            bool               `json:"-" bson:"email_confirmed"`
+	EmailConfirmed            bool               `json:"email_confirmed" bson:"email_confirmed"`
 	EmailToken                string             `json:"-" bson:"email_token"`
 	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
 	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
