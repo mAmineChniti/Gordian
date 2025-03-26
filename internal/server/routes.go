@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
-	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,57 +14,17 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
-	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/mAmineChniti/Gordian/internal/data"
 )
 
-func findTemplateFile(filename string) string {
-	locations := []string{
-		"internal/templates/" + filename,                        // Development path
-		"../internal/templates/" + filename,                     // Compiled binary path
-		"/app/internal/templates/" + filename,                   // Docker/production path
-		filepath.Join(os.Getenv("APP_TEMPLATES_DIR"), filename), // Configurable path
-		"/templates/" + filename,                                // Additional Docker path
-	}
+var (
+	jwtSecret = []byte(os.Getenv("JWTSECRET"))
+	debug     = os.Getenv("DEBUG") == "true"
+)
 
-	for _, path := range locations {
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(absPath); err == nil {
-			return absPath
-		}
-	}
-
-	log.Printf("Template file %s not found in any location", filename)
-	return ""
-}
-
-type TemplateRenderer struct {
-	templatePath string
-}
-
-func NewTemplateRenderer() *TemplateRenderer {
-	return &TemplateRenderer{
-		templatePath: findTemplateFile("email_confirmation.html"),
-	}
-}
-
-func (t *TemplateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
-
-	if t.templatePath == "" {
-		return fmt.Errorf("email confirmation template not found")
-	}
-
-	tmpl, err := template.ParseFiles(t.templatePath)
-	if err != nil {
-		return fmt.Errorf("failed to parse email confirmation template: %v", err)
-	}
-
-	return tmpl.Execute(w, data)
-}
-
+// Route Registration
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
 	e.Use(middleware.Logger())
@@ -90,32 +47,32 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	DEBUG(e)
 
+	// Public Routes
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusMovedPermanently, "/api/v1")
 	})
 	e.POST("/api/v1/register", s.Register)
 	e.POST("/api/v1/login", s.Login)
+	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
+	e.GET("/api/v1/health", s.healthHandler)
+
+	// Protected Routes
 	e.GET("/api/v1/fetchuser", s.FetchUser, s.JWTMiddleware())
 	e.POST("/api/v1/fetchuserbyid", s.FetchUserById, s.JWTMiddleware())
 	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
 	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
-	e.GET("/api/v1/health", s.healthHandler)
 	e.GET("/api/v1/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
-	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
+
 	e.RouteNotFound("/*", func(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"message": "The requested endpoint does not exist",
 		})
 	})
+
 	return e
 }
-
-var (
-	jwtSecret = []byte(os.Getenv("JWTSECRET"))
-	debug     = os.Getenv("DEBUG") == "true"
-)
 
 func DEBUG(e *echo.Echo) {
 	if debug {
@@ -155,40 +112,6 @@ func DEBUG(e *echo.Echo) {
 	}
 }
 
-func (s *Server) Login(c echo.Context) error {
-	var req data.LoginRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
-	}
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
-		})
-	}
-	user, err := s.db.FindUser(&req)
-	if err != nil {
-		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Username or email not found"})
-		}
-		if strings.Contains(err.Error(), "invalid password") {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Incorrect password"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred during login"})
-	}
-
-	tokens, err := s.db.CreateSession(user.ID)
-	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to create session"})
-	}
-
-	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Login successful", User: user, Tokens: tokens})
-}
-
 func (s *Server) Register(c echo.Context) error {
 	var req data.RegisterRequest
 	if err := c.Bind(&req); err != nil {
@@ -223,6 +146,93 @@ func (s *Server) Register(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Registration successful"})
+}
+
+func (s *Server) Login(c echo.Context) error {
+	var req data.LoginRequest
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	}
+	errorMsg, err := data.ValidateStruct(req)
+	if err != nil {
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"message": errorMsg,
+		})
+	}
+	user, err := s.db.FindUser(&req)
+	if err != nil {
+		c.Logger().Error(err.Error())
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Username or email not found"})
+		}
+		if strings.Contains(err.Error(), "invalid password") {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Incorrect password"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred during login"})
+	}
+
+	tokens, err := s.db.CreateSession(user.ID)
+	if err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to create session"})
+	}
+
+	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Login successful", User: user, Tokens: tokens})
+}
+
+func (s *Server) ConfirmEmail(c echo.Context) error {
+	token := c.Param("token")
+	if token == "" {
+		return c.Render(http.StatusOK, "email_confirmation.html", struct {
+			Success      bool
+			ErrorMessage string
+		}{
+			Success:      false,
+			ErrorMessage: "Missing email confirmation token",
+		})
+	}
+
+	success, errMsg := s.db.ConfirmEmail(token)
+
+	return c.Render(http.StatusOK, "email_confirmation.html", struct {
+		Success      bool
+		ErrorMessage string
+	}{
+		Success:      success,
+		ErrorMessage: errMsg,
+	})
+}
+
+func (s *Server) reConfirmEmail(c echo.Context) error {
+	userID := c.Get("user_id").(primitive.ObjectID)
+	err := s.db.ResendConfirmationEmail(userID)
+	if err != nil {
+		c.Logger().Error("ReConfirmEmail error:", err)
+		if strings.Contains(err.Error(), "already confirmed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"message": "Email is already confirmed",
+			})
+		}
+		if strings.Contains(err.Error(), "too many attempts") {
+			return c.JSON(http.StatusTooManyRequests, map[string]string{
+				"message": "Too many confirmation email requests. Please try again later.",
+			})
+		}
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"message": "User profile not found",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"message": "Unable to resend confirmation email",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Confirmation email sent successfully",
+	})
 }
 
 func (s *Server) FetchUser(c echo.Context) error {
@@ -375,6 +385,21 @@ func (s *Server) RefreshTokenHandler(c echo.Context) error {
 	})
 }
 
+func (s *Server) healthHandler(c echo.Context) error {
+	status, err := s.db.Health()
+	if err != nil {
+		c.Logger().Error("Health check error:", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"status":  "error",
+			"message": "Service health check failed",
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":  "ok",
+		"details": status,
+	})
+}
+
 func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 	config := echojwt.Config{
 		SigningKey: jwtSecret,
@@ -460,72 +485,4 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 		},
 	}
 	return echojwt.WithConfig(config)
-}
-
-func (s *Server) ConfirmEmail(c echo.Context) error {
-	token := c.Param("token")
-	if token == "" {
-		return c.Render(http.StatusOK, "email_confirmation.html", struct {
-			Success      bool
-			ErrorMessage string
-		}{
-			Success:      false,
-			ErrorMessage: "Missing email confirmation token",
-		})
-	}
-
-	success, errMsg := s.db.ConfirmEmail(token)
-
-	return c.Render(http.StatusOK, "email_confirmation.html", struct {
-		Success      bool
-		ErrorMessage string
-	}{
-		Success:      success,
-		ErrorMessage: errMsg,
-	})
-}
-
-func (s *Server) reConfirmEmail(c echo.Context) error {
-	userID := c.Get("user_id").(primitive.ObjectID)
-	err := s.db.ResendConfirmationEmail(userID)
-	if err != nil {
-		c.Logger().Error("ReConfirmEmail error:", err)
-		if strings.Contains(err.Error(), "already confirmed") {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"message": "Email is already confirmed",
-			})
-		}
-		if strings.Contains(err.Error(), "too many attempts") {
-			return c.JSON(http.StatusTooManyRequests, map[string]string{
-				"message": "Too many confirmation email requests. Please try again later.",
-			})
-		}
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"message": "User profile not found",
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"message": "Unable to resend confirmation email",
-		})
-	}
-
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Confirmation email sent successfully",
-	})
-}
-
-func (s *Server) healthHandler(c echo.Context) error {
-	status, err := s.db.Health()
-	if err != nil {
-		c.Logger().Error("Health check error:", err)
-		return c.JSON(http.StatusServiceUnavailable, map[string]any{
-			"status":  "error",
-			"message": "Service health check failed",
-		})
-	}
-	return c.JSON(http.StatusOK, map[string]any{
-		"status":  "ok",
-		"details": status,
-	})
 }
