@@ -21,7 +21,6 @@ import (
 )
 
 type Service interface {
-	Health() (map[string]string, error)
 	FindUser(user *data.LoginRequest) (*data.User, error)
 	GetUser(userID primitive.ObjectID) (*data.User, error)
 	CreateUser(user *data.RegisterRequest) error
@@ -31,6 +30,7 @@ type Service interface {
 	ConfirmEmail(token string) (bool, string)
 	ResendConfirmationEmail(userID primitive.ObjectID) error
 	DeleteUnconfirmedUsers() error
+	Health() (map[string]string, error)
 }
 
 type service struct {
@@ -46,13 +46,11 @@ var (
 )
 
 func New() Service {
-
 	uri := fmt.Sprintf("mongodb+srv://%s:%s%s", dbUsername, dbPassword, connectionString)
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
 
 	if err != nil {
 		log.Fatal(err)
-
 	}
 	return &service{
 		db:           client,
