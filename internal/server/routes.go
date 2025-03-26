@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,8 +19,52 @@ import (
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"html/template"
 )
+
+func findTemplateFile(filename string) string {
+	locations := []string{
+		"internal/templates/" + filename,                        // Development path
+		"../internal/templates/" + filename,                     // Compiled binary path
+		"/app/internal/templates/" + filename,                   // Docker/production path
+		filepath.Join(os.Getenv("APP_TEMPLATES_DIR"), filename), // Configurable path
+	}
+
+	for _, path := range locations {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	log.Fatal(fmt.Sprintf("Template file %s not found", filename))
+	return ""
+}
+
+type TemplateRenderer struct {
+	templates *template.Template
+}
+
+func (t *TemplateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
+	// Ensure the template name matches the filename
+	if name == "" {
+		name = "email_confirmation.html"
+	}
+
+	// Find the template by name
+	tmpl := t.templates.Lookup(name)
+	if tmpl == nil {
+		return fmt.Errorf("template %s not found", name)
+	}
+
+	return tmpl.Execute(w, data)
+}
+
+func NewTemplateRenderer() *TemplateRenderer {
+	tmplPath := findTemplateFile("email_confirmation.html")
+	tmpl := template.Must(template.ParseFiles(tmplPath))
+	return &TemplateRenderer{
+		templates: tmpl,
+	}
+}
 
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
@@ -36,6 +83,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: "method=${method}, uri=${uri}, status=${status}\n",
 	}))
+
+	e.Renderer = NewTemplateRenderer()
 
 	DEBUG(e)
 
@@ -114,8 +163,7 @@ func (s *Server) Login(c echo.Context) error {
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "Validation failed",
-			"errors":  errorMsg,
+			"message": errorMsg,
 		})
 	}
 	user, err := s.db.FindUser(&req)
@@ -149,8 +197,7 @@ func (s *Server) Register(c echo.Context) error {
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "Registration validation failed",
-			"errors":  errorMsg,
+			"message": errorMsg,
 		})
 	}
 	err = s.db.CreateUser(&req)
@@ -203,8 +250,7 @@ func (s *Server) FetchUserById(c echo.Context) error {
 	if err != nil {
 		c.Logger().Errorf("Validation error: %v", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "Validation failed",
-			"errors":  errorMsg,
+			"message": errorMsg,
 		})
 	}
 
@@ -257,8 +303,7 @@ func (s *Server) Update(c echo.Context) error {
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "Validation failed",
-			"errors":  errorMsg,
+			"message": errorMsg,
 		})
 	}
 	userID := c.Get("user_id").(primitive.ObjectID)
@@ -266,7 +311,6 @@ func (s *Server) Update(c echo.Context) error {
 	if err != nil {
 		c.Logger().Error("UpdateUser error:", err)
 
-		// Specific error handling based on error message
 		errStr := err.Error()
 		switch {
 		case strings.Contains(errStr, "user not found"):
@@ -419,13 +463,7 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
 	if token == "" {
-		tmpl, err := template.ParseFiles("internal/templates/email_confirmation.html")
-		if err != nil {
-			c.Logger().Error("Template parsing error:", err)
-			return c.HTML(http.StatusInternalServerError, "Error rendering template")
-		}
-
-		return tmpl.Execute(c.Response().Writer, struct {
+		return c.Render(http.StatusOK, "email_confirmation.html", struct {
 			Success      bool
 			ErrorMessage string
 		}{
@@ -436,13 +474,7 @@ func (s *Server) ConfirmEmail(c echo.Context) error {
 
 	success, errMsg := s.db.ConfirmEmail(token)
 
-	tmpl, err := template.ParseFiles("internal/templates/email_confirmation.html")
-	if err != nil {
-		c.Logger().Error("Template parsing error:", err)
-		return c.HTML(http.StatusInternalServerError, "Error rendering template")
-	}
-
-	return tmpl.Execute(c.Response().Writer, struct {
+	return c.Render(http.StatusOK, "email_confirmation.html", struct {
 		Success      bool
 		ErrorMessage string
 	}{
