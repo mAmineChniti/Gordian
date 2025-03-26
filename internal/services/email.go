@@ -108,9 +108,12 @@ func (s *GmailSMTPEmailService) SendConfirmationEmail(email, token string) error
 </html>
 `, confirmationLink)
 
-	subject := "Subject: Confirm Your Gordian Account\n"
-	mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
-	body := subject + mime + htmlBody
+	fromHeader := fmt.Sprintf("From: Gordian <%s>\r\n", s.from)
+	toHeader := fmt.Sprintf("To: %s\r\n", email)
+	subject := "Subject: Confirm Your Gordian Account\r\n"
+	mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
+
+	body := fromHeader + toHeader + subject + mime + htmlBody
 
 	auth := smtp.PlainAuth("", s.from, s.password, s.smtpHost)
 
