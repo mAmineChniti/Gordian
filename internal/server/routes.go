@@ -43,27 +43,24 @@ type TemplateRenderer struct {
 	templates *template.Template
 }
 
+func NewTemplateRenderer() *TemplateRenderer {
+	emailConfirmationPath := findTemplateFile("email_confirmation.html")
+	tmpl, err := template.ParseFiles(emailConfirmationPath)
+	if err != nil {
+		log.Fatalf("Failed to parse email confirmation template: %v", err)
+	}
+
+	return &TemplateRenderer{
+		templates: tmpl,
+	}
+}
+
 func (t *TemplateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
-	// Ensure the template name matches the filename
 	if name == "" {
 		name = "email_confirmation.html"
 	}
 
-	// Find the template by name
-	tmpl := t.templates.Lookup(name)
-	if tmpl == nil {
-		return fmt.Errorf("template %s not found", name)
-	}
-
-	return tmpl.Execute(w, data)
-}
-
-func NewTemplateRenderer() *TemplateRenderer {
-	tmplPath := findTemplateFile("email_confirmation.html")
-	tmpl := template.Must(template.ParseFiles(tmplPath))
-	return &TemplateRenderer{
-		templates: tmpl,
-	}
+	return t.templates.ExecuteTemplate(w, name, data)
 }
 
 func (s *Server) RegisterRoutes() http.Handler {
