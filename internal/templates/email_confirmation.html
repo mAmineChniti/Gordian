@@ -4,14 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gordian - Email Confirmation</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #3498db;
-            --success-color: #2ecc71;
-            --error-color: #e74c3c;
-            --background-color: #f4f6f9;
-            --text-color: #2c3e50;
+            --background: #ffffff;
+            --foreground: #0a0a0a;
+            --primary: #3498db;
+            --primary-foreground: #ffffff;
+            --secondary: #f4f4f5;
+            --secondary-foreground: #09090b;
+            --destructive: #ef4444;
+            --destructive-foreground: #ffffff;
+            --muted: #f4f4f5;
+            --muted-foreground: #71717a;
+            --border: #e4e4e7;
+            --input: #e4e4e7;
+            --ring: #3498db;
         }
 
         * {
@@ -23,82 +31,119 @@
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
             line-height: 1.6;
-            background-color: var(--background-color);
+            background-color: var(--background);
+            color: var(--foreground);
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            color: var(--text-color);
+            padding: 1rem;
         }
 
         .container {
-            background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-            padding: 40px;
-            text-align: center;
-            max-width: 500px;
             width: 100%;
-            transition: transform 0.3s ease;
+            max-width: 28rem;
+            background-color: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
         }
 
         .container:hover {
             transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
 
         .icon {
-            font-size: 72px;
-            margin-bottom: 20px;
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
         }
 
         .success .icon {
-            color: var(--success-color);
+            color: var(--primary);
             animation: bounce 1s ease;
         }
 
         .error .icon {
-            color: var(--error-color);
+            color: var(--destructive);
             animation: shake 0.5s ease;
         }
 
         h1 {
-            margin-bottom: 15px;
+            font-size: 1.5rem;
             font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--foreground);
         }
 
         p {
-            color: #6c757d;
-            margin-bottom: 20px;
+            color: var(--muted-foreground);
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+
+        .success .badge {
+            background-color: rgba(52, 152, 219, 0.1);
+            color: var(--primary);
+        }
+
+        .error .badge {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: var(--destructive);
         }
 
         @keyframes bounce {
-            0%, 20%, 50%, 80%, 100% {transform: translateY(0);}
-            40% {transform: translateY(-20px);}
-            60% {transform: translateY(-10px);}
+            0%, 20%, 50%, 80%, 100% { transform: scale(1); }
+            40% { transform: scale(1.1); }
+            60% { transform: scale(1.05); }
         }
 
         @keyframes shake {
-            0%, 100% {transform: translateX(0);}
-            10%, 30%, 50%, 70%, 90% {transform: translateX(-10px);}
-            20%, 40%, 60%, 80% {transform: translateX(10px);}
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+            20%, 40%, 60%, 80% { transform: translateX(10px); }
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 640px) {
             .container {
-                margin: 20px;
-                padding: 30px;
+                max-width: 100%;
+                margin: 1rem;
+                padding: 1.5rem;
             }
         }
     </style>
 </head>
 <body>
     <div class="container {{if .Success}}success{{else}}error{{end}}">
+        {{if .Success}}
+            <div class="badge">Confirmed</div>
+        {{else}}
+            <div class="badge">Error</div>
+        {{end}}
+        
         <div class="icon">
             {{if .Success}}✓{{else}}✗{{end}}
         </div>
+        
         {{if .Success}}
             <h1>Email Confirmed!</h1>
-            <p>Your email has been successfully confirmed.</p>
+            <p>Your email has been successfully verified.</p>
         {{else}}
             <h1>Email Confirmation Failed</h1>
             <p>{{.ErrorMessage}}</p>
