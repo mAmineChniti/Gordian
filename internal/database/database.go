@@ -126,6 +126,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 	emailToken := uuid.New().String()
 
 	endUser := data.User{
+		ID:                        primitive.NewObjectID(),
 		Username:                  user.Username,
 		Email:                     user.Email,
 		Hash:                      string(hash),
