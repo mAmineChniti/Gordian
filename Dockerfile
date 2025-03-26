@@ -21,6 +21,7 @@ WORKDIR /app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /gordian-build/main /app/
+COPY --from=builder /gordian-build/internal/templates /app/internal/templates
 
 EXPOSE 8080
 
