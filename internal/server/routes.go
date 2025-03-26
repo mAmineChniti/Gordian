@@ -102,7 +102,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
 	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
-	e.GET("/api/v1/confirm-email", s.reConfirmEmail, s.JWTMiddleware())
+	e.GET("/api/v1/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
 	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
 	e.RouteNotFound("/*", func(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{
