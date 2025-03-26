@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
+	"github.com/mAmineChniti/Gordian/internal/services"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -26,10 +28,14 @@ type Service interface {
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
 	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
+	ConfirmEmail(token string) error
+	ResendConfirmationEmail(userID primitive.ObjectID) error
+	DeleteUnconfirmedUsers() error
 }
 
 type service struct {
-	db *mongo.Client
+	db           *mongo.Client
+	emailService services.EmailService
 }
 
 var (
@@ -49,7 +55,8 @@ func New() Service {
 
 	}
 	return &service{
-		db: client,
+		db:           client,
+		emailService: services.NewGmailSMTPEmailService(),
 	}
 }
 
@@ -96,7 +103,7 @@ func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
 }
 
 func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.SessionTokens, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	filter := bson.M{"$or": []bson.M{{"username": user.Username}, {"email": user.Email}}}
 	foundUser, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, filter)
@@ -116,15 +123,21 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 		return nil, nil, fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
 	}
 
+	emailToken := uuid.New().String()
+
 	endUser := data.User{
-		ID:         primitive.NewObjectID(),
-		Username:   user.Username,
-		Email:      user.Email,
-		Hash:       string(hash),
-		FirstName:  user.FirstName,
-		LastName:   user.LastName,
-		Birthdate:  birthdate,
-		DateJoined: time.Now(),
+		ID:                        primitive.NewObjectID(),
+		Username:                  user.Username,
+		Email:                     user.Email,
+		Hash:                      string(hash),
+		FirstName:                 user.FirstName,
+		LastName:                  user.LastName,
+		Birthdate:                 birthdate,
+		DateJoined:                time.Now(),
+		EmailConfirmed:            false,
+		EmailToken:                emailToken,
+		EmailConfirmationAttempts: 1,
+		LastEmailAttemptTime:      time.Now(),
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
 	if err != nil {
@@ -134,6 +147,11 @@ func (s *service) CreateUser(user *data.RegisterRequest) (*data.User, *data.Sess
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create session: %v", err)
 	}
+
+	if err := s.emailService.SendConfirmationEmail(endUser.Email, emailToken); err != nil {
+		return nil, nil, fmt.Errorf("failed to send confirmation email: %v", err)
+	}
+
 	return &endUser, tokens, nil
 }
 
@@ -236,6 +254,108 @@ func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens,
 		RefreshToken:     refreshToken,
 		RefreshExpiresAt: refreshClaims.ExpiresAt.Time,
 	}, nil
+}
+
+func (s *service) ConfirmEmail(token string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"email_token": token}
+	update := bson.M{
+		"$set": bson.M{
+			"email_confirmed": true,
+			"email_token":     "",
+		},
+	}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var updatedUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOneAndUpdate(
+		ctx,
+		filter,
+		update,
+		opts,
+	).Decode(&updatedUser)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("invalid or expired email confirmation token")
+		}
+		return fmt.Errorf("failed to confirm email: %w", err)
+	}
+
+	return nil
+}
+
+func (s *service) ResendConfirmationEmail(userID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var user data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("database error: %v", err)
+	}
+
+	if user.EmailConfirmed {
+		return fmt.Errorf("email already confirmed")
+	}
+
+	if user.EmailConfirmationAttempts >= 3 {
+		return fmt.Errorf("maximum email confirmation attempts reached")
+	}
+
+	if time.Since(user.LastEmailAttemptTime) < 5*time.Minute {
+		return fmt.Errorf("please wait 5 minutes before requesting another confirmation email")
+	}
+
+	newEmailToken := uuid.New().String()
+
+	update := bson.M{
+		"$set": bson.M{
+			"email_token":                 newEmailToken,
+			"email_confirmation_attempts": user.EmailConfirmationAttempts + 1,
+			"last_email_attempt_time":     time.Now(),
+		},
+	}
+
+	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+		ctx,
+		bson.M{"_id": userID},
+		update,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update user: %v", err)
+	}
+
+	if err := s.emailService.SendConfirmationEmail(user.Email, newEmailToken); err != nil {
+		return fmt.Errorf("failed to send confirmation email: %v", err)
+	}
+
+	return nil
+}
+
+func (s *service) DeleteUnconfirmedUsers() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	deleteFilter := bson.M{
+		"email_confirmed": false,
+		"date_joined": bson.M{
+			"$lte": time.Now().AddDate(0, 0, -3),
+		},
+	}
+
+	result, err := s.db.Database("gordian").Collection("users").DeleteMany(ctx, deleteFilter)
+	if err != nil {
+		return fmt.Errorf("failed to delete unconfirmed users: %v", err)
+	}
+
+	log.Printf("Deleted %d unconfirmed users older than 3 days", result.DeletedCount)
+	return nil
 }
 
 func (s *service) Health() (map[string]string, error) {

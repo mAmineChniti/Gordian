@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mAmineChniti/Gordian/internal/database"
 	"github.com/mAmineChniti/Gordian/internal/server"
 )
 
@@ -37,6 +38,20 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
+
+	dbService := database.New()
+
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			err := dbService.DeleteUnconfirmedUsers()
+			if err != nil {
+				log.Printf("Error deleting unconfirmed users: %v", err)
+			}
+		}
+	}()
 
 	server := server.NewServer()
 
