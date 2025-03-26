@@ -3,6 +3,7 @@ package data
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -42,7 +43,7 @@ func ValidateStruct(s any) (string, error) {
 	err := validate.Struct(s)
 	if req, ok := s.(UpdateRequest); ok {
 		if req.Username == "" && req.Email == "" && req.Password == "" && req.FirstName == "" && req.LastName == "" && req.Birthdate == "" {
-			return "", fmt.Errorf("empty update request")
+			return "", fmt.Errorf("no fields provided for update")
 		}
 	}
 	if err != nil {
@@ -52,12 +53,24 @@ func ValidateStruct(s any) (string, error) {
 
 		validationErrors := err.(validator.ValidationErrors)
 		if len(validationErrors) > 0 {
-			fieldErr := validationErrors[0]
-			if fieldErr.Tag() == "birthdate" {
-				return fmt.Sprintf("%s must indicate a user who is 18+ years old", fieldErr.Field()), fmt.Errorf("validation errors")
-			} else {
-				return fmt.Sprintf("%s failed on '%s' tag", fieldErr.Field(), fieldErr.Tag()), fmt.Errorf("validation errors")
+			var errorMessages []string
+			for _, fieldErr := range validationErrors {
+				var errorMsg string
+				switch fieldErr.Tag() {
+				case "required":
+					errorMsg = fmt.Sprintf("%s is a required field", fieldErr.Field())
+				case "min":
+					errorMsg = fmt.Sprintf("%s must be at least %s characters long", fieldErr.Field(), fieldErr.Param())
+				case "email":
+					errorMsg = fmt.Sprintf("%s must be a valid email address", fieldErr.Field())
+				case "birthdate":
+					errorMsg = fmt.Sprintf("%s must indicate a user who is 18+ years old", fieldErr.Field())
+				default:
+					errorMsg = fmt.Sprintf("%s failed validation on '%s' tag", fieldErr.Field(), fieldErr.Tag())
+				}
+				errorMessages = append(errorMessages, errorMsg)
 			}
+			return strings.Join(errorMessages, "; "), fmt.Errorf("validation errors")
 		}
 		return "Unknown validation error", fmt.Errorf("validation errors")
 	}
