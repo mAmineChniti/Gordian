@@ -16,7 +16,6 @@ import (
 	"github.com/labstack/gommon/log"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -54,7 +53,9 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.GET("/api/v1/confirm-email", s.reConfirmEmail, s.JWTMiddleware())
 	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
 	e.RouteNotFound("/*", func(c echo.Context) error {
-		return c.JSON(http.StatusNotFound, map[string]string{"message": "Not found"})
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"message": "The requested endpoint does not exist",
+		})
 	})
 	return e
 }
@@ -106,7 +107,7 @@ func (s *Server) Login(c echo.Context) error {
 	var req data.LoginRequest
 	if err := c.Bind(&req); err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
@@ -119,16 +120,19 @@ func (s *Server) Login(c echo.Context) error {
 	user, err := s.db.FindUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "user not found") || strings.Contains(err.Error(), "invalid password") {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid credentials"})
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Username or email not found"})
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		if strings.Contains(err.Error(), "invalid password") {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Incorrect password"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred during login"})
 	}
 
 	tokens, err := s.db.CreateSession(user.ID)
 	if err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to create session"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to create session"})
 	}
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Login successful", User: user, Tokens: tokens})
@@ -138,23 +142,35 @@ func (s *Server) Register(c echo.Context) error {
 	var req data.RegisterRequest
 	if err := c.Bind(&req); err != nil {
 		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid registration request format"})
 	}
 	errorMsg, err := data.ValidateStruct(req)
 	if err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "Validation failed",
+			"message": "Registration validation failed",
 			"errors":  errorMsg,
 		})
 	}
 	user, tokens, err := s.db.CreateUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "failed to hash password") {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		if strings.Contains(err.Error(), "user already exists") {
+			return c.JSON(http.StatusConflict, map[string]string{"message": "Username or email is already registered"})
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		if strings.Contains(err.Error(), "failed to hash password") {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to process password"})
+		}
+		if strings.Contains(err.Error(), "failed to parse birthdate") {
+			return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid birthdate format"})
+		}
+		if strings.Contains(err.Error(), "failed to send confirmation email") {
+			return c.JSON(http.StatusPartialContent, map[string]string{
+				"message": "Registration successful, but confirmation email could not be sent",
+				"user":    user.Username,
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Registration failed"})
 	}
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Registration successful", User: user, Tokens: tokens})
@@ -164,13 +180,13 @@ func (s *Server) FetchUser(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	user, err := s.db.GetUser(userID)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "Your user profile could not be retrieved"})
 		}
 		c.Logger().Error("GetUser error:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while fetching your profile"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"message": "User fetched successfully", "user": user})
+	return c.JSON(http.StatusOK, map[string]any{"message": "User profile retrieved successfully", "user": user})
 }
 
 func (s *Server) FetchUserById(c echo.Context) error {
@@ -200,11 +216,14 @@ func (s *Server) FetchUserById(c echo.Context) error {
 
 	user, err := s.db.GetUser(objID)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "The specified user could not be found"})
 		}
-		c.Logger().Errorf("GetUser error: %v", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		if strings.Contains(err.Error(), "db error") {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while retrieving user information"})
+		}
+		c.Logger().Error("Unexpected error in FetchUserById:", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An unexpected error occurred"})
 	}
 
 	type UserResponse struct {
@@ -245,15 +264,33 @@ func (s *Server) Update(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	updatedUser, err := s.db.UpdateUser(userID, &req)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "User not found"})
-		}
 		c.Logger().Error("UpdateUser error:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+
+		// Specific error handling based on error message
+		errStr := err.Error()
+		switch {
+		case strings.Contains(errStr, "user not found"):
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "Your user profile could not be found"})
+
+		case strings.Contains(errStr, "no fields to update"):
+			return c.JSON(http.StatusBadRequest, map[string]string{"message": "No update fields provided"})
+
+		case strings.Contains(errStr, "password hashing failed"):
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to process password update"})
+
+		case strings.Contains(errStr, "failed to parse birthdate"):
+			return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid birthdate format"})
+
+		case strings.Contains(errStr, "failed to update user"):
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile"})
+
+		default:
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unexpected error during profile update"})
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
-		"message": "User updated successfully",
+		"message": "Profile updated successfully",
 		"user":    updatedUser,
 	})
 }
@@ -263,20 +300,33 @@ func (s *Server) Delete(c echo.Context) error {
 	err := s.db.DeleteUser(userID)
 	if err != nil {
 		c.Logger().Error("DeleteUser error:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error: couldn't delete user"})
+		if strings.Contains(err.Error(), "failed to delete user") {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"message": "An error occurred while deleting your account",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"message": "Unexpected error during account deletion",
+		})
 	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "User deleted successfully"})
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Account deleted successfully",
+	})
 }
 
 func (s *Server) RefreshTokenHandler(c echo.Context) error {
-	userId := c.Get("user_id").(primitive.ObjectID)
-	tokens, err := s.db.CreateSession(userId)
+	userID := c.Get("user_id").(primitive.ObjectID)
+	tokens, err := s.db.CreateSession(userID)
 	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to generate new access token"})
+		c.Logger().Error("RefreshToken error:", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"message": "Unable to refresh authentication tokens",
+		})
 	}
-
-	return c.JSON(http.StatusOK, data.TokenResponse{Message: "Token refreshed successfully", Tokens: tokens})
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "Tokens refreshed successfully",
+		"tokens":  tokens,
+	})
 }
 
 func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
@@ -369,57 +419,75 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
 	if token == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid confirmation token"})
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"message": "Missing email confirmation token",
+		})
 	}
 
 	err := s.db.ConfirmEmail(token)
 	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to confirm email"})
+		c.Logger().Error("ConfirmEmail error:", err)
+		if strings.Contains(err.Error(), "invalid token") {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"message": "Invalid or expired email confirmation token",
+			})
+		}
+		if strings.Contains(err.Error(), "already confirmed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"message": "Email is already confirmed",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"message": "An error occurred during email confirmation",
+		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return c.JSON(http.StatusOK, map[string]string{
 		"message": "Email confirmed successfully",
 	})
 }
 
 func (s *Server) reConfirmEmail(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
-
 	err := s.db.ResendConfirmationEmail(userID)
 	if err != nil {
-		c.Logger().Error("ResendConfirmationEmail error:", err)
-
-		switch {
-		case strings.Contains(err.Error(), "maximum email confirmation attempts reached"):
-			return c.JSON(http.StatusTooManyRequests, map[string]string{
-				"message": "Maximum email confirmation attempts reached. Please contact support.",
-			})
-		case strings.Contains(err.Error(), "please wait"):
-			return c.JSON(http.StatusTooManyRequests, map[string]string{
-				"message": "Please wait 5 minutes before requesting another confirmation email.",
-			})
-		case strings.Contains(err.Error(), "email already confirmed"):
-			return c.JSON(http.StatusBadRequest, map[string]string{
-				"message": "Your email is already confirmed.",
-			})
-		default:
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"message": "Failed to resend confirmation email.",
+		c.Logger().Error("ReConfirmEmail error:", err)
+		if strings.Contains(err.Error(), "already confirmed") {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"message": "Email is already confirmed",
 			})
 		}
+		if strings.Contains(err.Error(), "too many attempts") {
+			return c.JSON(http.StatusTooManyRequests, map[string]string{
+				"message": "Too many confirmation email requests. Please try again later.",
+			})
+		}
+		if strings.Contains(err.Error(), "user not found") {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"message": "User profile not found",
+			})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"message": "Unable to resend confirmation email",
+		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Confirmation email resent successfully. Please check your inbox.",
+		"message": "Confirmation email sent successfully",
 	})
 }
 
 func (s *Server) healthHandler(c echo.Context) error {
-	health, err := s.db.Health()
+	status, err := s.db.Health()
 	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+		c.Logger().Error("Health check error:", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"status":  "error",
+			"message": "Service health check failed",
+		})
 	}
-	return c.JSON(http.StatusOK, health)
+	return c.JSON(http.StatusOK, map[string]any{
+		"status":  "ok",
+		"details": status,
+	})
 }
