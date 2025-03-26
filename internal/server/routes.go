@@ -27,40 +27,45 @@ func findTemplateFile(filename string) string {
 		"../internal/templates/" + filename,                     // Compiled binary path
 		"/app/internal/templates/" + filename,                   // Docker/production path
 		filepath.Join(os.Getenv("APP_TEMPLATES_DIR"), filename), // Configurable path
+		"/templates/" + filename,                                // Additional Docker path
 	}
 
 	for _, path := range locations {
-		if _, err := os.Stat(path); err == nil {
-			return path
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			return absPath
 		}
 	}
 
-	log.Fatal(fmt.Sprintf("Template file %s not found", filename))
+	log.Printf("Template file %s not found in any location", filename)
 	return ""
 }
 
 type TemplateRenderer struct {
-	templates *template.Template
+	templatePath string
 }
 
 func NewTemplateRenderer() *TemplateRenderer {
-	emailConfirmationPath := findTemplateFile("email_confirmation.html")
-	tmpl, err := template.ParseFiles(emailConfirmationPath)
-	if err != nil {
-		log.Fatalf("Failed to parse email confirmation template: %v", err)
-	}
-
 	return &TemplateRenderer{
-		templates: tmpl,
+		templatePath: findTemplateFile("email_confirmation.html"),
 	}
 }
 
 func (t *TemplateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
-	if name == "" {
-		name = "email_confirmation.html"
+
+	if t.templatePath == "" {
+		return fmt.Errorf("email confirmation template not found")
 	}
 
-	return t.templates.ExecuteTemplate(w, name, data)
+	tmpl, err := template.ParseFiles(t.templatePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse email confirmation template: %v", err)
+	}
+
+	return tmpl.Execute(w, data)
 }
 
 func (s *Server) RegisterRoutes() http.Handler {

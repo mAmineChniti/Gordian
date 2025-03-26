@@ -271,7 +271,6 @@ func (s *service) ConfirmEmail(token string) (bool, string) {
 	update := bson.M{
 		"$set": bson.M{
 			"email_confirmed": true,
-			"email_token":     "",
 		},
 	}
 	err = s.db.Database("gordian").Collection("users").FindOneAndUpdate(
