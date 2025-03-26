@@ -7,14 +7,18 @@ import (
 )
 
 type User struct {
-	ID         primitive.ObjectID `json:"id" bson:"_id"`
-	Username   string             `json:"username" bson:"username"`
-	Email      string             `json:"email" bson:"email"`
-	Hash       string             `json:"-" bson:"hash"`
-	FirstName  string             `json:"first_name" bson:"first_name"`
-	LastName   string             `json:"last_name" bson:"last_name"`
-	Birthdate  time.Time          `json:"birthdate" bson:"birthdate"`
-	DateJoined time.Time          `json:"date_joined" bson:"date_joined"`
+	ID                        primitive.ObjectID `json:"id" bson:"_id"`
+	Username                  string             `json:"username" bson:"username"`
+	Email                     string             `json:"email" bson:"email"`
+	Hash                      string             `json:"-" bson:"hash"`
+	FirstName                 string             `json:"first_name" bson:"first_name"`
+	LastName                  string             `json:"last_name" bson:"last_name"`
+	Birthdate                 time.Time          `json:"birthdate" bson:"birthdate"`
+	DateJoined                time.Time          `json:"date_joined" bson:"date_joined"`
+	EmailConfirmed            bool               `json:"-" bson:"email_confirmed"`
+	EmailToken                string             `json:"-" bson:"email_token"`
+	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
+	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
 }
 
 type LoginRequest struct {

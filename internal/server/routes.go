@@ -51,6 +51,8 @@ func (s *Server) RegisterRoutes() http.Handler {
 	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
 	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
 	e.GET("/api/v1/health", s.healthHandler)
+	e.GET("/api/v1/confirm-email", s.reConfirmEmail, s.JWTMiddleware())
+	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
 	e.RouteNotFound("/*", func(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"message": "Not found"})
 	})
@@ -362,6 +364,55 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 		},
 	}
 	return echojwt.WithConfig(config)
+}
+
+func (s *Server) ConfirmEmail(c echo.Context) error {
+	token := c.Param("token")
+	if token == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid confirmation token"})
+	}
+
+	err := s.db.ConfirmEmail(token)
+	if err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to confirm email"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "Email confirmed successfully",
+	})
+}
+
+func (s *Server) reConfirmEmail(c echo.Context) error {
+	userID := c.Get("user_id").(primitive.ObjectID)
+
+	err := s.db.ResendConfirmationEmail(userID)
+	if err != nil {
+		c.Logger().Error("ResendConfirmationEmail error:", err)
+
+		switch {
+		case strings.Contains(err.Error(), "maximum email confirmation attempts reached"):
+			return c.JSON(http.StatusTooManyRequests, map[string]string{
+				"message": "Maximum email confirmation attempts reached. Please contact support.",
+			})
+		case strings.Contains(err.Error(), "please wait"):
+			return c.JSON(http.StatusTooManyRequests, map[string]string{
+				"message": "Please wait 5 minutes before requesting another confirmation email.",
+			})
+		case strings.Contains(err.Error(), "email already confirmed"):
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"message": "Your email is already confirmed.",
+			})
+		default:
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"message": "Failed to resend confirmation email.",
+			})
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Confirmation email resent successfully. Please check your inbox.",
+	})
 }
 
 func (s *Server) healthHandler(c echo.Context) error {
