@@ -4,70 +4,159 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gordian - Email Confirmation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #1a1e24;
+            --text-primary: #e6e6e6;
+            --text-secondary: #a1a8b0;
+            --accent-color: #3498db;
+            --accent-color-hover: #2980b9;
+            --border-color: #2c3e50;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: #0f0f0f;
-            color: #e5e5e5;
-            text-align: center;
-            padding: 40px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
         }
+
         .container {
-            background: #1a1a1a;
-            padding: 24px;
-            border-radius: 12px;
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            background: var(--bg-secondary);
+            padding: 32px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
             max-width: 500px;
-            margin: auto;
-            border: 1px solid #262626;
+            width: 100%;
+            border: 1px solid var(--border-color);
+            text-align: center;
+            transition: transform 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
+
+        .status-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
         .badge {
-            font-size: 18px;
-            font-weight: bold;
-            padding: 12px 24px;
-            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 20px;
             margin-bottom: 20px;
-            display: inline-block;
             text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        .success .badge { background: #22c55e; color: white; }
-        .error .badge { background: #ef4444; color: white; }
+
+        .badge.success { 
+            background: var(--success-color); 
+            color: white; 
+        }
+
+        .badge.error { 
+            background: var(--error-color); 
+            color: white; 
+        }
+
         .icon {
-            font-size: 64px;
+            font-size: 72px;
             margin: 16px 0;
+            opacity: 0.9;
+            transition: transform 0.3s ease;
         }
-        .button {
-            display: inline-block;
-            padding: 12px 24px;
-            background: #6366f1;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            transition: background 0.3s;
-            font-weight: 600;
+
+        .container:hover .icon {
+            transform: scale(1.1);
         }
-        .button:hover {
-            background: #4f46e5;
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+            font-weight: 700;
         }
+
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            font-size: 16px;
+        }
+
         .footer {
             margin-top: 24px;
-            padding: 20px;
-            font-size: 14px;
-            color: #a1a1a1;
-            background: #141414;
+            padding: 16px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: rgba(44, 62, 80, 0.2);
             border-radius: 10px;
+            width: 100%;
+            text-align: center;
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 24px;
+                border-radius: 12px;
+            }
+
+            .badge {
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+
+            .icon {
+                font-size: 56px;
+            }
+
+            h1 {
+                font-size: 20px;
+            }
+
+            p {
+                font-size: 14px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container {{if .Success}}success{{else}}error{{end}}">
-        <div class="badge">{{if .Success}}Confirmed{{else}}Error{{end}}</div>
-        <div class="icon">{{if .Success}}✅{{else}}❌{{end}}</div>
-        <h1>{{if .Success}}Email Confirmed!{{else}}Email Confirmation Failed{{end}}</h1>
-        <p>{{if .Success}}Your email has been successfully verified.{{else}}{{.ErrorMessage}}{{end}}</p>
+    <div class="container">
+        {{if .Success}}
+            <div class="status-container">
+                <div class="badge success">Confirmed</div>
+                <div class="icon">✅</div>
+                <h1>Email Confirmed!</h1>
+                <p>Your email has been successfully verified.</p>
+            </div>
+        {{else}}
+            <div class="status-container">
+                <div class="badge error">Error</div>
+                <div class="icon">❌</div>
+                <h1>Email Confirmation Failed</h1>
+                <p>{{.ErrorMessage}}</p>
+            </div>
+        {{end}}
     </div>
     <div class="footer">
-        <p>© {{.Year}} Gordian. All rights reserved.</p>
+        <p>&copy; {{.Year}} Gordian. All rights reserved.</p>
     </div>
 </body>
 </html>
