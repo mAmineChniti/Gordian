@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gordian - Email Confirmation</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f0f0f;
+            color: #e5e5e5;
+            text-align: center;
+            padding: 40px;
+        }
+        .container {
+            background: #1a1a1a;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            margin: auto;
+            border: 1px solid #262626;
+        }
+        .badge {
+            font-size: 18px;
+            font-weight: bold;
+            padding: 12px 24px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: inline-block;
+            text-transform: uppercase;
+        }
+        .success .badge { background: #22c55e; color: white; }
+        .error .badge { background: #ef4444; color: white; }
+        .icon {
+            font-size: 64px;
+            margin: 16px 0;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #6366f1;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: background 0.3s;
+            font-weight: 600;
+        }
+        .button:hover {
+            background: #4f46e5;
+        }
+        .footer {
+            margin-top: 24px;
+            padding: 20px;
+            font-size: 14px;
+            color: #a1a1a1;
+            background: #141414;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container {{if .Success}}success{{else}}error{{end}}">
+        <div class="badge">{{if .Success}}Confirmed{{else}}Error{{end}}</div>
+        <div class="icon">{{if .Success}}✅{{else}}❌{{end}}</div>
+        <h1>{{if .Success}}Email Confirmed!{{else}}Email Confirmation Failed{{end}}</h1>
+        <p>{{if .Success}}Your email has been successfully verified.{{else}}{{.ErrorMessage}}{{end}}</p>
+    </div>
+    <div class="footer">
+        <p>© {{.Year}} Gordian. All rights reserved.</p>
+    </div>
+</body>
+</html>

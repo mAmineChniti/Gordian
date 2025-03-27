@@ -19,6 +19,8 @@ type User struct {
 	EmailToken                string             `json:"-" bson:"email_token"`
 	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
 	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
+	PasswordResetToken        string             `bson:"password_reset_token,omitempty"`
+	PasswordResetExpiry       time.Time          `bson:"password_reset_expiry,omitempty"`
 }
 
 type LoginRequest struct {
@@ -62,4 +64,13 @@ type LoginRegisterResponse struct {
 	Message string         `json:"message"`
 	User    *User          `json:"user"`
 	Tokens  *SessionTokens `json:"tokens"`
+}
+
+type PasswordResetInitiateRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type PasswordResetConfirmRequest struct {
+	Token       string `json:"token" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=8,max=72"`
 }

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm Your Gordian Account</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f0f0f;
+            color: #e5e5e5;
+            text-align: center;
+            padding: 40px;
+        }
+        .container {
+            background: #1a1a1a;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            max-width: 450px;
+            margin: auto;
+            border: 1px solid #262626;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #6366f1;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: background 0.3s;
+            font-weight: 600;
+        }
+        .button:hover {
+            background: #4f46e5;
+        }
+        .footer {
+            margin-top: 24px;
+            font-size: 14px;
+            color: #a1a1a1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Gordian</div>
+        <h1>Confirm Your Email</h1>
+        <p>Welcome to Gordian! Click the button below to confirm your email:</p>
+        <a href="{{.ConfirmationLink}}" class="button">Confirm Email Address</a>
+        <p>If you did not sign up, ignore this email.</p>
+        <div class="footer">
+            <p>© {{.Year}} Gordian. All rights reserved.</p>
+            <p>This is an automated email. Do not reply.</p>
+        </div>
+    </div>
+</body>
+</html>
