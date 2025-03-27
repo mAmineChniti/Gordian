@@ -14,6 +14,7 @@
             --accent-color: #3498db;
             --accent-color-hover: #2980b9;
             --border-color: #2c3e50;
+            --token-bg: #2c3e50;
         }
 
         * {
@@ -28,10 +29,12 @@
             color: var(--text-primary);
             line-height: 1.6;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             padding: 20px;
+            position: relative;
         }
 
         .container {
@@ -44,6 +47,9 @@
             border: 1px solid var(--border-color);
             text-align: center;
             transition: transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
         .container:hover {
@@ -56,6 +62,7 @@
             color: var(--accent-color);
             margin-bottom: 24px;
             letter-spacing: -1px;
+            text-align: center;
         }
 
         h1 {
@@ -63,12 +70,15 @@
             margin-bottom: 16px;
             color: var(--text-primary);
             font-weight: 700;
+            text-align: center;
         }
 
         .description {
             color: var(--text-secondary);
             margin-bottom: 24px;
             font-size: 16px;
+            text-align: center;
+            max-width: 400px;
         }
 
         .button {
@@ -83,6 +93,7 @@
             font-size: 16px;
             margin-bottom: 24px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
         }
 
         .button:hover {
@@ -95,13 +106,22 @@
             color: var(--text-secondary);
             font-size: 14px;
             margin-bottom: 24px;
+            text-align: center;
+            max-width: 400px;
         }
 
         .footer {
-            border-top: 1px solid var(--border-color);
-            padding-top: 16px;
+            margin-top: 24px;
+            padding: 16px;
             font-size: 12px;
             color: var(--text-secondary);
+            background: rgba(44, 62, 80, 0.2);
+            border-radius: 10px;
+            width: 100%;
+            text-align: center;
+            position: absolute;
+            bottom: 0;
+            left: 0;
         }
 
         @media (max-width: 480px) {
@@ -134,7 +154,6 @@
         <p class="ignore-text">If you did not create an account, please ignore this email.</p>
         <div class="footer">
             <p>&copy; {{.Year}} Gordian. All rights reserved.</p>
-            <p>This is an automated email. Please do not reply.</p>
         </div>
     </div>
 </body>
