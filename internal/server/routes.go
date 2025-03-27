@@ -47,23 +47,28 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	DEBUG(e)
 
-	// Public Routes
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusMovedPermanently, "/api/v1")
 	})
-	e.POST("/api/v1/register", s.Register)
-	e.POST("/api/v1/login", s.Login)
-	e.GET("/api/v1/confirm-email/:token", s.ConfirmEmail)
-	e.GET("/api/v1/health", s.healthHandler)
 
-	// Protected Routes
-	e.GET("/api/v1/fetchuser", s.FetchUser, s.JWTMiddleware())
-	e.POST("/api/v1/fetchuserbyid", s.FetchUserById, s.JWTMiddleware())
-	e.PUT("/api/v1/update", s.Update, s.JWTMiddleware())
-	e.PATCH("/api/v1/update", s.Update, s.JWTMiddleware())
-	e.DELETE("/api/v1/delete", s.Delete, s.JWTMiddleware())
-	e.GET("/api/v1/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
-	e.GET("/api/v1/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
+	v1 := e.Group("/api/v1")
+	{
+		v1.POST("/register", s.Register)
+		v1.POST("/login", s.Login)
+		v1.GET("/confirm-email/:token", s.ConfirmEmail)
+		v1.GET("/health", s.healthHandler)
+
+		v1.POST("/password-reset/initiate", s.PasswordResetInitiate)
+		v1.POST("/password-reset/confirm", s.PasswordResetConfirm)
+
+		v1.GET("/fetchuser", s.FetchUser, s.JWTMiddleware())
+		v1.POST("/fetchuserbyid", s.FetchUserById, s.JWTMiddleware())
+		v1.PUT("/update", s.Update, s.JWTMiddleware())
+		v1.PATCH("/update", s.Update, s.JWTMiddleware())
+		v1.DELETE("/delete", s.Delete, s.JWTMiddleware())
+		v1.GET("/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
+		v1.GET("/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
+	}
 
 	e.RouteNotFound("/*", func(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{
@@ -74,42 +79,62 @@ func (s *Server) RegisterRoutes() http.Handler {
 	return e
 }
 
-func DEBUG(e *echo.Echo) {
-	if debug {
-		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
-			if len(reqBody) > 0 {
-				var formattedReq any
-				if err := json.Unmarshal(reqBody, &formattedReq); err != nil {
-					log.Printf("Request Body (raw): \n%s\n", string(reqBody))
-					c.Logger().Error("Error parsing request body: " + err.Error())
-				} else {
-					reqBodyJson, err := json.MarshalIndent(formattedReq, "", "  ")
-					if err != nil {
-						log.Printf("Request Body (raw): \n%s\n", string(reqBody))
-						c.Logger().Error("Error marshaling request body: " + err.Error())
-					} else {
-						c.Logger().Debug("Request Body:\n" + string(reqBodyJson))
-					}
-				}
-			}
-
-			if len(resBody) > 0 {
-				var formattedRes any
-				if err := json.Unmarshal(resBody, &formattedRes); err != nil {
-					log.Printf("Response Body (raw): \n%s\n", string(resBody))
-					c.Logger().Error("Error parsing response body: " + err.Error())
-				} else {
-					resBodyJson, err := json.MarshalIndent(formattedRes, "", "  ")
-					if err != nil {
-						log.Printf("Response Body (raw): \n%s\n", string(resBody))
-						c.Logger().Error("Error marshaling response body: " + err.Error())
-					} else {
-						c.Logger().Debug("Response Body:\n" + string(resBodyJson))
-					}
-				}
-			}
-		}))
+func (s *Server) PasswordResetInitiate(c echo.Context) error {
+	var req data.PasswordResetInitiateRequest
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
+
+	if errMsg, err := data.ValidateStruct(req); err != nil {
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"message": errMsg,
+		})
+	}
+
+	err := s.db.InitiatePasswordReset(req.Email)
+	if err != nil {
+		c.Logger().Error(err.Error())
+		if strings.Contains(err.Error(), "no user found with email") {
+			return c.JSON(http.StatusNotFound, map[string]string{"message": "No user found with this email"})
+		}
+		if strings.Contains(err.Error(), "failed to send password reset email") {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to send password reset email check if the email is valid"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "If an account exists with this email, a reset link will be sent",
+	})
+}
+
+func (s *Server) PasswordResetConfirm(c echo.Context) error {
+	var req data.PasswordResetConfirmRequest
+	if err := c.Bind(&req); err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	}
+
+	errorMsg, err := data.ValidateStruct(req)
+	if err != nil {
+		c.Logger().Error("Validation error:", err)
+		return c.JSON(http.StatusBadRequest, map[string]any{
+			"message": errorMsg,
+		})
+	}
+
+	if err := s.db.ResetPassword(req.Token, req.NewPassword); err != nil {
+		c.Logger().Error(err.Error())
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"message": "Invalid or expired reset token",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Password reset successfully",
+	})
 }
 
 func (s *Server) Register(c echo.Context) error {
@@ -185,10 +210,12 @@ func (s *Server) Login(c echo.Context) error {
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
 	if token == "" {
-		return c.Render(http.StatusOK, "email_confirmation.html", struct {
+		return c.Render(http.StatusOK, "confirmation_page.html", struct {
+			Year         int
 			Success      bool
 			ErrorMessage string
 		}{
+			Year:         time.Now().Year(),
 			Success:      false,
 			ErrorMessage: "Missing email confirmation token",
 		})
@@ -196,10 +223,12 @@ func (s *Server) ConfirmEmail(c echo.Context) error {
 
 	success, errMsg := s.db.ConfirmEmail(token)
 
-	return c.Render(http.StatusOK, "email_confirmation.html", struct {
+	return c.Render(http.StatusOK, "confirmation_page.html", struct {
+		Year         int
 		Success      bool
 		ErrorMessage string
 	}{
+		Year:         time.Now().Year(),
 		Success:      success,
 		ErrorMessage: errMsg,
 	})
@@ -485,4 +514,42 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 		},
 	}
 	return echojwt.WithConfig(config)
+}
+
+func DEBUG(e *echo.Echo) {
+	if debug {
+		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
+			if len(reqBody) > 0 {
+				var formattedReq any
+				if err := json.Unmarshal(reqBody, &formattedReq); err != nil {
+					log.Printf("Request Body (raw): \n%s\n", string(reqBody))
+					c.Logger().Error("Error parsing request body: " + err.Error())
+				} else {
+					reqBodyJson, err := json.MarshalIndent(formattedReq, "", "  ")
+					if err != nil {
+						log.Printf("Request Body (raw): \n%s\n", string(reqBody))
+						c.Logger().Error("Error marshaling request body: " + err.Error())
+					} else {
+						c.Logger().Debug("Request Body:\n" + string(reqBodyJson))
+					}
+				}
+			}
+
+			if len(resBody) > 0 {
+				var formattedRes any
+				if err := json.Unmarshal(resBody, &formattedRes); err != nil {
+					log.Printf("Response Body (raw): \n%s\n", string(resBody))
+					c.Logger().Error("Error parsing response body: " + err.Error())
+				} else {
+					resBodyJson, err := json.MarshalIndent(formattedRes, "", "  ")
+					if err != nil {
+						log.Printf("Response Body (raw): \n%s\n", string(resBody))
+						c.Logger().Error("Error marshaling response body: " + err.Error())
+					} else {
+						c.Logger().Debug("Response Body:\n" + string(resBodyJson))
+					}
+				}
+			}
+		}))
+	}
 }

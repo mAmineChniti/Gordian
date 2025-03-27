@@ -30,6 +30,8 @@ type Service interface {
 	ConfirmEmail(token string) (bool, string)
 	ResendConfirmationEmail(userID primitive.ObjectID) error
 	DeleteUnconfirmedUsers() error
+	InitiatePasswordReset(email string) error
+	ResetPassword(token, newPassword string) error
 	Health() (map[string]string, error)
 }
 
@@ -353,6 +355,89 @@ func (s *service) DeleteUnconfirmedUsers() error {
 	}
 
 	log.Printf("Deleted %d unconfirmed users older than 3 days", result.DeletedCount)
+	return nil
+}
+
+func (s *service) InitiatePasswordReset(email string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var foundUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"email": email}).Decode(&foundUser)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("no user found with email: %s", email)
+		}
+		return fmt.Errorf("database error: %v", err)
+	}
+
+	resetToken := uuid.New().String()
+	resetTokenExpiry := time.Now().Add(1 * time.Hour)
+
+	update := bson.M{
+		"$set": bson.M{
+			"password_reset_token":  resetToken,
+			"password_reset_expiry": resetTokenExpiry,
+		},
+	}
+
+	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+		ctx,
+		bson.M{"_id": foundUser.ID},
+		update,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update password reset token: %v", err)
+	}
+
+	if err := s.emailService.SendPasswordResetEmail(email, resetToken); err != nil {
+		return fmt.Errorf("failed to send password reset email: %v", err)
+	}
+
+	return nil
+}
+
+func (s *service) ResetPassword(token, newPassword string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var foundUser data.User
+	err := s.db.Database("gordian").Collection("users").FindOne(
+		ctx,
+		bson.M{
+			"password_reset_token":  token,
+			"password_reset_expiry": bson.M{"$gt": time.Now()},
+		},
+	).Decode(&foundUser)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return fmt.Errorf("invalid or expired reset token")
+		}
+		return fmt.Errorf("database error: %v", err)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %v", err)
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"hash":                  string(hashedPassword),
+			"password_reset_token":  "",
+			"password_reset_expiry": time.Time{},
+		},
+	}
+
+	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+		ctx,
+		bson.M{"_id": foundUser.ID},
+		update,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update password: %v", err)
+	}
+
 	return nil
 }
 
