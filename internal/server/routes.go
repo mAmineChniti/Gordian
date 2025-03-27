@@ -249,6 +249,11 @@ func (s *Server) reConfirmEmail(c echo.Context) error {
 				"message": "User profile not found",
 			})
 		}
+		if strings.Contains(err.Error(), "please wait 5 minutes before requesting another confirmation email") {
+			return c.JSON(http.StatusTooManyRequests, map[string]string{
+				"message": "Please wait 5 minutes before requesting another confirmation email",
+			})
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"message": "Unable to resend confirmation email",
 		})
