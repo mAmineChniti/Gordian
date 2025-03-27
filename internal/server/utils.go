@@ -1,10 +1,10 @@
 package server
 
 import (
+	"fmt"
 	"html/template"
 	"io"
 	"log"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/mAmineChniti/Gordian/internal/templates"
@@ -18,30 +18,30 @@ func findTemplateFile(filename string) string {
 	return templatePath
 }
 
-type TemplateRenderer struct {
-	templatePath string
+type templateRenderer struct{}
+
+func NewTemplateRenderer() echo.Renderer {
+	return &templateRenderer{}
 }
 
-func NewTemplateRenderer() *TemplateRenderer {
-	return &TemplateRenderer{
-		templatePath: findTemplateFile("email_confirmation_page.html"),
+func (r *templateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
+	templatePath := findTemplateFile(name)
+	if templatePath == "" {
+		log.Printf("Template file %s not found", name)
+		return fmt.Errorf("template %s not found", name)
 	}
-}
 
-func (r *TemplateRenderer) Render(w io.Writer, name string, data any, c echo.Context) error {
-	tmpl, err := template.ParseFiles(r.templatePath)
+	tmpl, err := template.New(name).ParseFiles(templatePath)
 	if err != nil {
-		log.Printf("Error parsing template: %v", err)
+		log.Printf("Error parsing template %s: %v", name, err)
 		return err
 	}
 
-	var renderedTemplate strings.Builder
-	err = tmpl.Execute(&renderedTemplate, data)
+	err = tmpl.Execute(w, data)
 	if err != nil {
-		log.Printf("Error executing template: %v", err)
+		log.Printf("Error executing template %s: %v", name, err)
 		return err
 	}
 
-	_, err = w.Write([]byte(renderedTemplate.String()))
-	return err
+	return nil
 }

@@ -24,7 +24,6 @@ var (
 	debug     = os.Getenv("DEBUG") == "true"
 )
 
-// Route Registration
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
 	e.Use(middleware.Logger())
@@ -209,28 +208,24 @@ func (s *Server) Login(c echo.Context) error {
 
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
-	if token == "" {
-		return c.Render(http.StatusOK, "confirmation_page.html", struct {
-			Year         int
-			Success      bool
-			ErrorMessage string
-		}{
-			Year:         time.Now().Year(),
-			Success:      false,
-			ErrorMessage: "Missing email confirmation token",
+	c.Logger().Infof("Received email confirmation token: %s", token)
+
+	confirmed, message := s.db.ConfirmEmail(token)
+	c.Logger().Infof("Email confirmation result: confirmed=%v, message=%s", confirmed, message)
+
+	if !confirmed {
+		c.Logger().Errorf("Email confirmation failed: %s", message)
+		return c.Render(http.StatusBadRequest, "confirmation_page.html", map[string]any{
+			"Success": false,
+			"Message": message,
+			"Year":    time.Now().Year(),
 		})
 	}
 
-	success, errMsg := s.db.ConfirmEmail(token)
-
-	return c.Render(http.StatusOK, "confirmation_page.html", struct {
-		Year         int
-		Success      bool
-		ErrorMessage string
-	}{
-		Year:         time.Now().Year(),
-		Success:      success,
-		ErrorMessage: errMsg,
+	return c.Render(http.StatusOK, "confirmation_page.html", map[string]any{
+		"Success": true,
+		"Message": message,
+		"Year":    time.Now().Year(),
 	})
 }
 

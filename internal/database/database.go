@@ -284,7 +284,7 @@ func (s *service) ConfirmEmail(token string) (bool, string) {
 		return false, "Failed to confirm email. Please try again."
 	}
 
-	return true, ""
+	return true, "Email confirmed successfully"
 }
 
 func (s *service) ResendConfirmationEmail(userID primitive.ObjectID) error {
