@@ -19,8 +19,9 @@ type User struct {
 	EmailToken                string             `json:"-" bson:"email_token"`
 	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
 	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
-	PasswordResetToken        string             `bson:"password_reset_token,omitempty"`
-	PasswordResetExpiry       time.Time          `bson:"password_reset_expiry,omitempty"`
+	PasswordResetToken        string             `json:"-" bson:"password_reset_token,omitempty"`
+	PasswordResetExpiry       time.Time          `json:"-" bson:"password_reset_expiry,omitempty"`
+	AcceptTerms               bool               `json:"-" bson:"accept_terms"`
 }
 
 type LoginRequest struct {
@@ -29,12 +30,13 @@ type LoginRequest struct {
 }
 
 type RegisterRequest struct {
-	Username  string `json:"username" validate:"required,min=5"`
-	Email     string `json:"email" validate:"required,email"`
-	Password  string `json:"password" validate:"required,min=6"`
-	FirstName string `json:"first_name" validate:"required,min=3"`
-	LastName  string `json:"last_name" validate:"required,min=3"`
-	Birthdate string `json:"birthdate" validate:"required,birthdate"`
+	Username    string `json:"username" validate:"required,min=5"`
+	Email       string `json:"email" validate:"required,email"`
+	Password    string `json:"password" validate:"required,min=6"`
+	FirstName   string `json:"first_name" validate:"required,min=3"`
+	LastName    string `json:"last_name" validate:"required,min=3"`
+	Birthdate   string `json:"birthdate" validate:"required,birthdate"`
+	AcceptTerms bool   `json:"accept_terms" validate:"required,eq=true"`
 }
 
 type UpdateRequest struct {
