@@ -345,7 +345,7 @@ func (s *service) DeleteUnconfirmedUsers() error {
 	deleteFilter := bson.M{
 		"email_confirmed": false,
 		"date_joined": bson.M{
-			"$lte": time.Now().AddDate(0, 0, -3),
+			"$lt": time.Now().AddDate(0, 0, -3),
 		},
 	}
 
