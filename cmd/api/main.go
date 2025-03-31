@@ -42,7 +42,7 @@ func main() {
 	dbService := database.New()
 
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
+		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 
 		for range ticker.C {
