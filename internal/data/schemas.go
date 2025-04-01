@@ -14,14 +14,14 @@ type User struct {
 	FirstName                 string             `json:"first_name" bson:"first_name"`
 	LastName                  string             `json:"last_name" bson:"last_name"`
 	Birthdate                 time.Time          `json:"birthdate" bson:"birthdate"`
-	DateJoined                time.Time          `json:"date_joined" bson:"date_joined"`
 	EmailConfirmed            bool               `json:"email_confirmed" bson:"email_confirmed"`
+	AcceptTerms               bool               `json:"accept_terms" bson:"accept_terms"`
+	DateJoined                time.Time          `json:"date_joined" bson:"date_joined"`
 	EmailToken                string             `json:"-" bson:"email_token"`
 	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
 	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
 	PasswordResetToken        string             `json:"-" bson:"password_reset_token,omitempty"`
 	PasswordResetExpiry       time.Time          `json:"-" bson:"password_reset_expiry,omitempty"`
-	AcceptTerms               bool               `json:"-" bson:"accept_terms"`
 }
 
 type LoginRequest struct {
