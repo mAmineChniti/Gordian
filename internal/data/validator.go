@@ -3,7 +3,9 @@ package data
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -15,6 +17,10 @@ func init() {
 
 	if err := Validate.RegisterValidation("rfc3339", validateBirthdate); err != nil {
 		panic(fmt.Sprintf("Failed to register birthdate validation: %v", err))
+	}
+
+	if err := Validate.RegisterValidation("password_complexity", validatePasswordComplexity); err != nil {
+		panic(fmt.Sprintf("Failed to register password complexity validation: %v", err))
 	}
 }
 
@@ -34,6 +40,40 @@ func validateBirthdate(fl validator.FieldLevel) bool {
 	}
 
 	return age >= 18
+}
+
+func validatePasswordComplexity(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+
+	if len(password) < 8 {
+		return false
+	}
+
+	if len(password) > 64 {
+		return false
+	}
+
+	hasUppercase := false
+	hasLowercase := false
+	hasDigit := false
+	hasSpecialChar := false
+
+	specialChars := "!@#$%^&*(),.?"
+
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			hasUppercase = true
+		case unicode.IsLower(char):
+			hasLowercase = true
+		case unicode.IsDigit(char):
+			hasDigit = true
+		case strings.ContainsRune(specialChars, char):
+			hasSpecialChar = true
+		}
+	}
+
+	return hasUppercase && hasLowercase && hasDigit && hasSpecialChar
 }
 
 func ValidateRegisterRequest(req *RegisterRequest) error {
