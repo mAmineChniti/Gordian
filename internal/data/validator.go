@@ -16,6 +16,9 @@ func init() {
 	if err := validate.RegisterValidation("birthdate", validateBirthdate); err != nil {
 		log.Fatalf("Failed to register birthdate validator: %v", err)
 	}
+	if err := validate.RegisterValidation("containsany", validatePasswordComplexity); err != nil {
+		log.Fatalf("Failed to register password complexity validator: %v", err)
+	}
 }
 
 func validateBirthdate(fl validator.FieldLevel) bool {
@@ -37,6 +40,34 @@ func validateBirthdate(fl validator.FieldLevel) bool {
 	}
 
 	return age >= 18
+}
+
+func validatePasswordComplexity(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+
+	hasUppercase := false
+	hasLowercase := false
+	hasDigit := false
+	hasSpecialChar := false
+
+	specialChars := "!@#$%^&*(),.?\":{}|<>"
+
+	for _, char := range password {
+		switch {
+		case 'A' <= char && char <= 'Z':
+			hasUppercase = true
+		case 'a' <= char && char <= 'z':
+			hasLowercase = true
+		case '0' <= char && char <= '9':
+			hasDigit = true
+		default:
+			if strings.ContainsRune(specialChars, char) {
+				hasSpecialChar = true
+			}
+		}
+	}
+
+	return hasUppercase && hasLowercase && hasDigit && hasSpecialChar
 }
 
 func ValidateStruct(s any) (string, error) {
