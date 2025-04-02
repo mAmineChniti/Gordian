@@ -42,7 +42,8 @@ func validateBirthdate(fl validator.FieldLevel) bool {
 func ValidateStruct(s any) (string, error) {
 	err := validate.Struct(s)
 	if req, ok := s.(UpdateRequest); ok {
-		if req.Username == "" && req.Email == "" && req.Password == "" && req.FirstName == "" && req.LastName == "" && req.Birthdate == "" {
+		if req.Username == "" && req.Email == "" && req.Password == "" &&
+			req.FirstName == "" && req.LastName == "" && req.Birthdate == "" {
 			return "", fmt.Errorf("no fields provided for update")
 		}
 	}
@@ -61,10 +62,24 @@ func ValidateStruct(s any) (string, error) {
 					errorMsg = fmt.Sprintf("%s is a required field", fieldErr.Field())
 				case "min":
 					errorMsg = fmt.Sprintf("%s must be at least %s characters long", fieldErr.Field(), fieldErr.Param())
+				case "max":
+					errorMsg = fmt.Sprintf("%s must be at most %s characters long", fieldErr.Field(), fieldErr.Param())
 				case "email":
 					errorMsg = fmt.Sprintf("%s must be a valid email address", fieldErr.Field())
 				case "birthdate":
 					errorMsg = fmt.Sprintf("%s must indicate a user who is 18+ years old", fieldErr.Field())
+				case "containsany":
+					errorMsg = fmt.Sprintf("%s must contain at least one character from the specified set", fieldErr.Field())
+				case "eqfield":
+					errorMsg = fmt.Sprintf("%s must match %s", fieldErr.Field(), fieldErr.Param())
+				case "uuid":
+					errorMsg = fmt.Sprintf("%s must be a valid UUID", fieldErr.Field())
+				case "eq":
+					if fieldErr.Param() == "true" {
+						errorMsg = fmt.Sprintf("%s must be true", fieldErr.Field())
+					} else {
+						errorMsg = fmt.Sprintf("%s failed validation", fieldErr.Field())
+					}
 				default:
 					errorMsg = fmt.Sprintf("%s failed validation on '%s' tag", fieldErr.Field(), fieldErr.Tag())
 				}

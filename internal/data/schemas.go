@@ -26,25 +26,25 @@ type User struct {
 
 type LoginRequest struct {
 	Identifier string `json:"identifier" validate:"required,min=5"`
-	Password   string `json:"password" validate:"required,min=6"`
+	Password   string `json:"password" validate:"required,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
 }
 
 type RegisterRequest struct {
-	Username    string `json:"username" validate:"required,min=5"`
+	Username    string `json:"username" validate:"required,min=5,max=20"`
 	Email       string `json:"email" validate:"required,email"`
-	Password    string `json:"password" validate:"required,min=6"`
-	FirstName   string `json:"first_name" validate:"required,min=3"`
-	LastName    string `json:"last_name" validate:"required,min=3"`
+	Password    string `json:"password" validate:"required,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
+	FirstName   string `json:"first_name" validate:"required,min=2,max=50"`
+	LastName    string `json:"last_name" validate:"required,min=2,max=50"`
 	Birthdate   string `json:"birthdate" validate:"required,birthdate"`
 	AcceptTerms bool   `json:"accept_terms" validate:"required,eq=true"`
 }
 
 type UpdateRequest struct {
-	Username  string `json:"username,omitempty" validate:"omitempty,min=5"`
+	Username  string `json:"username,omitempty" validate:"omitempty,min=5,max=20"`
 	Email     string `json:"email,omitempty" validate:"omitempty,email"`
-	Password  string `json:"password,omitempty" validate:"omitempty,min=6"`
-	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=3"`
-	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=3"`
+	Password  string `json:"password,omitempty" validate:"omitempty,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
+	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=2,max=50"`
+	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=2,max=50"`
 	Birthdate string `json:"birthdate,omitempty" validate:"omitempty,birthdate"`
 }
 
@@ -73,6 +73,6 @@ type PasswordResetInitiateRequest struct {
 }
 
 type PasswordResetConfirmRequest struct {
-	Token       string `json:"token" validate:"required"`
-	NewPassword string `json:"new_password" validate:"required,min=8,max=72"`
+	Token       string `json:"token" validate:"required,uuid"`
+	NewPassword string `json:"new_password" validate:"required,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
 }
