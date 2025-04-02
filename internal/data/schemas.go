@@ -32,7 +32,7 @@ type LoginRequest struct {
 type RegisterRequest struct {
 	Username    string `json:"username" validate:"required,min=5,max=20"`
 	Email       string `json:"email" validate:"required,email"`
-	Password    string `json:"password" validate:"required,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
+	Password    string `json:"password" validate:"required,min=8,max=64,containsany"`
 	FirstName   string `json:"first_name" validate:"required,min=2,max=50"`
 	LastName    string `json:"last_name" validate:"required,min=2,max=50"`
 	Birthdate   string `json:"birthdate" validate:"required,birthdate"`
@@ -42,7 +42,7 @@ type RegisterRequest struct {
 type UpdateRequest struct {
 	Username  string `json:"username,omitempty" validate:"omitempty,min=5,max=20"`
 	Email     string `json:"email,omitempty" validate:"omitempty,email"`
-	Password  string `json:"password,omitempty" validate:"omitempty,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
+	Password  string `json:"password,omitempty" validate:"omitempty,min=8,max=64,containsany"`
 	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=2,max=50"`
 	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=2,max=50"`
 	Birthdate string `json:"birthdate,omitempty" validate:"omitempty,birthdate"`
@@ -74,5 +74,5 @@ type PasswordResetInitiateRequest struct {
 
 type PasswordResetConfirmRequest struct {
 	Token       string `json:"token" validate:"required,uuid"`
-	NewPassword string `json:"new_password" validate:"required,min=8,max=64,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789,containsany=!@#$%^&*(),.?\":{}|<>"`
+	NewPassword string `json:"new_password" validate:"required,min=8,max=64,containsany"`
 }
