@@ -117,7 +117,6 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %v", err)
 	}
-
 	birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 	if err != nil {
 		return fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
@@ -138,6 +137,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 		EmailToken:                emailToken,
 		EmailConfirmationAttempts: 1,
 		LastEmailAttemptTime:      time.Now(),
+		AcceptTerms:               user.AcceptTerms,
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
 	if err != nil {
@@ -178,7 +178,7 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 	if user.Birthdate != "" {
 		birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
+			return nil, fmt.Errorf("failed to parse birthdate: %v", err)
 		}
 		updateFields["birthdate"] = birthdate
 	}
