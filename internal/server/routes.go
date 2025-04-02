@@ -85,10 +85,10 @@ func (s *Server) PasswordResetInitiate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 
-	if errMsg, err := data.ValidateStruct(req); err != nil {
+	if err := data.Validate.Struct(&req); err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errMsg,
+			"message": err.Error(),
 		})
 	}
 
@@ -116,11 +116,10 @@ func (s *Server) PasswordResetConfirm(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
+	if err := data.Validate.Struct(&req); err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
+			"message": err.Error(),
 		})
 	}
 
@@ -142,14 +141,15 @@ func (s *Server) Register(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid registration request format"})
 	}
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
+
+	if err := data.Validate.Struct(&req); err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
+			"message": err.Error(),
 		})
 	}
-	err = s.db.CreateUser(&req)
+
+	err := s.db.CreateUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
 		if strings.Contains(err.Error(), "user already exists") {
@@ -178,13 +178,14 @@ func (s *Server) Login(c echo.Context) error {
 		c.Logger().Error(err.Error())
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
+
+	if err := data.Validate.Struct(&req); err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
+			"message": err.Error(),
 		})
 	}
+
 	user, err := s.db.FindUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
@@ -287,11 +288,11 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
 
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
+	// Validate the request struct
+	if err := data.Validate.Struct(req); err != nil {
 		c.Logger().Errorf("Validation error: %v", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
+			"message": "User ID is required",
 		})
 	}
 
@@ -340,13 +341,13 @@ func (s *Server) Update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
 	}
 
-	errorMsg, err := data.ValidateStruct(req)
-	if err != nil {
+	if err := data.Validate.Struct(&req); err != nil {
 		c.Logger().Error("Validation error:", err)
 		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": errorMsg,
+			"message": err.Error(),
 		})
 	}
+
 	userID := c.Get("user_id").(primitive.ObjectID)
 	updatedUser, err := s.db.UpdateUser(userID, &req)
 	if err != nil {

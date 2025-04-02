@@ -1,124 +1,149 @@
 package data
 
 import (
+	"errors"
 	"fmt"
-	"log"
-	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 )
 
-var validate *validator.Validate
+var Validate *validator.Validate
 
 func init() {
-	validate = validator.New()
-	if err := validate.RegisterValidation("birthdate", validateBirthdate); err != nil {
-		log.Fatalf("Failed to register birthdate validator: %v", err)
-	}
-	if err := validate.RegisterValidation("containsany", validatePasswordComplexity); err != nil {
-		log.Fatalf("Failed to register password complexity validator: %v", err)
+	Validate = validator.New()
+
+	if err := Validate.RegisterValidation("rfc3339", validateBirthdate); err != nil {
+		panic(fmt.Sprintf("Failed to register birthdate validation: %v", err))
 	}
 }
 
 func validateBirthdate(fl validator.FieldLevel) bool {
-	dateStr := fl.Field().String()
-	if dateStr == "" {
-		return false
-	}
+	birthdateStr := fl.Field().String()
 
-	birthdate, err := time.Parse(time.RFC3339, dateStr)
+	birthdate, err := time.Parse(time.RFC3339, birthdateStr)
 	if err != nil {
 		return false
 	}
 
-	now := time.Now()
-	age := now.Year() - birthdate.Year()
-
-	if now.Month() < birthdate.Month() || (now.Month() == birthdate.Month() && now.Day() < birthdate.Day()) {
+	today := time.Now()
+	age := today.Year() - birthdate.Year()
+	if today.Month() < birthdate.Month() ||
+		(today.Month() == birthdate.Month() && today.Day() < birthdate.Day()) {
 		age--
 	}
 
 	return age >= 18
 }
 
-func validatePasswordComplexity(fl validator.FieldLevel) bool {
-	password := fl.Field().String()
-
-	hasUppercase := false
-	hasLowercase := false
-	hasDigit := false
-	hasSpecialChar := false
-
-	specialChars := "!@#$%^&*(),.?\":{}|<>"
-
-	for _, char := range password {
-		switch {
-		case 'A' <= char && char <= 'Z':
-			hasUppercase = true
-		case 'a' <= char && char <= 'z':
-			hasLowercase = true
-		case '0' <= char && char <= '9':
-			hasDigit = true
-		default:
-			if strings.ContainsRune(specialChars, char) {
-				hasSpecialChar = true
+func ValidateRegisterRequest(req *RegisterRequest) error {
+	if err := Validate.Struct(req); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			for _, e := range validationErrors {
+				switch e.Tag() {
+				case "required":
+					return fmt.Errorf("%s is required", e.Field())
+				case "min":
+					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+				case "max":
+					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+				case "email":
+					return errors.New("invalid email format")
+				case "rfc3339":
+					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
+				case "eq":
+					return errors.New("you must accept the terms and conditions")
+				}
 			}
 		}
+		return err
 	}
-
-	return hasUppercase && hasLowercase && hasDigit && hasSpecialChar
+	return nil
 }
 
-func ValidateStruct(s any) (string, error) {
-	err := validate.Struct(s)
-	if req, ok := s.(UpdateRequest); ok {
-		if req.Username == "" && req.Email == "" && req.Password == "" &&
-			req.FirstName == "" && req.LastName == "" && req.Birthdate == "" {
-			return "", fmt.Errorf("no fields provided for update")
-		}
-	}
-	if err != nil {
-		if _, ok := err.(*validator.InvalidValidationError); ok {
-			return "", fmt.Errorf("invalid validation error: %w", err)
-		}
-
-		validationErrors := err.(validator.ValidationErrors)
-		if len(validationErrors) > 0 {
-			var errorMessages []string
-			for _, fieldErr := range validationErrors {
-				var errorMsg string
-				switch fieldErr.Tag() {
+func ValidateLoginRequest(req *LoginRequest) error {
+	if err := Validate.Struct(req); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			for _, e := range validationErrors {
+				switch e.Tag() {
 				case "required":
-					errorMsg = fmt.Sprintf("%s is a required field", fieldErr.Field())
+					return fmt.Errorf("%s is required", e.Field())
 				case "min":
-					errorMsg = fmt.Sprintf("%s must be at least %s characters long", fieldErr.Field(), fieldErr.Param())
-				case "max":
-					errorMsg = fmt.Sprintf("%s must be at most %s characters long", fieldErr.Field(), fieldErr.Param())
-				case "email":
-					errorMsg = fmt.Sprintf("%s must be a valid email address", fieldErr.Field())
-				case "birthdate":
-					errorMsg = fmt.Sprintf("%s must indicate a user who is 18+ years old", fieldErr.Field())
+					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
 				case "containsany":
-					errorMsg = fmt.Sprintf("%s must contain at least one character from the specified set", fieldErr.Field())
-				case "eqfield":
-					errorMsg = fmt.Sprintf("%s must match %s", fieldErr.Field(), fieldErr.Param())
-				case "uuid":
-					errorMsg = fmt.Sprintf("%s must be a valid UUID", fieldErr.Field())
-				case "eq":
-					if fieldErr.Param() == "true" {
-						errorMsg = fmt.Sprintf("%s must be true", fieldErr.Field())
-					} else {
-						errorMsg = fmt.Sprintf("%s failed validation", fieldErr.Field())
-					}
-				default:
-					errorMsg = fmt.Sprintf("%s failed validation on '%s' tag", fieldErr.Field(), fieldErr.Tag())
+					return errors.New("password must contain at least one uppercase, lowercase, number, or special character")
 				}
-				errorMessages = append(errorMessages, errorMsg)
 			}
-			return strings.Join(errorMessages, "; "), fmt.Errorf("validation errors")
 		}
-		return "Unknown validation error", fmt.Errorf("validation errors")
+		return err
 	}
-	return "", nil
+	return nil
+}
+
+func ValidateUpdateRequest(req *UpdateRequest) error {
+	if err := Validate.Struct(req); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			for _, e := range validationErrors {
+				switch e.Tag() {
+				case "omitempty":
+					continue
+				case "min":
+					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+				case "max":
+					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+				case "email":
+					return errors.New("invalid email format")
+				case "rfc3339":
+					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
+				}
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func ValidatePasswordResetInitiateRequest(req *PasswordResetInitiateRequest) error {
+	if err := Validate.Struct(req); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			for _, e := range validationErrors {
+				switch e.Tag() {
+				case "required":
+					return fmt.Errorf("%s is required", e.Field())
+				case "email":
+					return errors.New("invalid email format")
+				}
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func ValidatePasswordResetConfirmRequest(req *PasswordResetConfirmRequest) error {
+	if err := Validate.Struct(req); err != nil {
+		var validationErrors validator.ValidationErrors
+		if errors.As(err, &validationErrors) {
+			for _, e := range validationErrors {
+				switch e.Tag() {
+				case "required":
+					return fmt.Errorf("%s is required", e.Field())
+				case "uuid":
+					return errors.New("invalid token format")
+				case "min":
+					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+				case "max":
+					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+				case "containsany":
+					return errors.New("password must contain at least one uppercase, lowercase, number, or special character")
+				}
+			}
+		}
+		return err
+	}
+	return nil
 }
