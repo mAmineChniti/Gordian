@@ -22,6 +22,10 @@ func init() {
 	if err := Validate.RegisterValidation("password_complexity", validatePasswordComplexity); err != nil {
 		panic(fmt.Sprintf("Failed to register password complexity validation: %v", err))
 	}
+
+	if err := Validate.RegisterValidation("base64_max_10mb", validateBase64Max10MB); err != nil {
+		panic(fmt.Sprintf("Failed to register base64 size validation: %v", err))
+	}
 }
 
 func validateBirthdate(fl validator.FieldLevel) bool {
@@ -76,6 +80,17 @@ func validatePasswordComplexity(fl validator.FieldLevel) bool {
 	return hasUppercase && hasLowercase && hasDigit && hasSpecialChar
 }
 
+func validateBase64Max10MB(fl validator.FieldLevel) bool {
+	base64Str := fl.Field().String()
+	if len(base64Str) == 0 {
+		return true // Field is optional
+	}
+
+	// Calculate approximate size of base64 string in bytes
+	sizeInBytes := len(base64Str) * 3 / 4
+	return sizeInBytes <= 10*1024*1024 // 10MB
+}
+
 func ValidateRegisterRequest(req *RegisterRequest) error {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
@@ -94,6 +109,8 @@ func ValidateRegisterRequest(req *RegisterRequest) error {
 					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
 				case "eq":
 					return errors.New("you must accept the terms and conditions")
+				case "base64_max_10mb":
+					return errors.New("profile picture exceeds 10MB limit")
 				}
 			}
 		}
@@ -138,6 +155,8 @@ func ValidateUpdateRequest(req *UpdateRequest) error {
 					return errors.New("invalid email format")
 				case "rfc3339":
 					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
+				case "base64_max_10mb":
+					return errors.New("profile picture exceeds 10MB limit")
 				}
 			}
 		}

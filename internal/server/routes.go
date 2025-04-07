@@ -204,7 +204,11 @@ func (s *Server) Login(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to create session"})
 	}
 
-	return c.JSON(http.StatusOK, data.LoginRegisterResponse{Message: "Login successful", User: user, Tokens: tokens})
+	return c.JSON(http.StatusOK, data.LoginRegisterResponse{
+		Message: "Login successful",
+		User:    user,
+		Tokens:  tokens,
+	})
 }
 
 func (s *Server) ConfirmEmail(c echo.Context) error {
@@ -369,7 +373,8 @@ func (s *Server) Update(c echo.Context) error {
 
 		case strings.Contains(errStr, "failed to update user"):
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile"})
-
+		case strings.Contains(errStr, "failed to update profile picture"):
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile picture"})
 		default:
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unexpected error during profile update"})
 		}

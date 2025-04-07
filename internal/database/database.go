@@ -138,6 +138,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 		EmailConfirmationAttempts: 1,
 		LastEmailAttemptTime:      time.Now(),
 		AcceptTerms:               user.AcceptTerms,
+		ProfilePicture:            user.ProfilePicture,
 	}
 	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
 	if err != nil {
@@ -181,6 +182,9 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 			return nil, fmt.Errorf("failed to parse birthdate: %v", err)
 		}
 		updateFields["birthdate"] = birthdate
+	}
+	if user.ProfilePicture != "" {
+		updateFields["profile_picture"] = user.ProfilePicture
 	}
 
 	if len(updateFields) == 0 {
