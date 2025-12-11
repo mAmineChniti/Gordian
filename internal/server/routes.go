@@ -26,7 +26,6 @@ var (
 
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
-	e.Use(middleware.RequestLoggerWithConfig())
 	e.Use(middleware.Recover())
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
@@ -38,8 +37,14 @@ func (s *Server) RegisterRoutes() http.Handler {
 	}))
 
 	e.Logger.SetLevel(log.DEBUG)
-	e.Use(middleware.RequestLoggerWithConfig(middleware.LoggerConfig{
-		Format: "method=${method}, uri=${uri}, status=${status}\n",
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogStatus: true,
+		LogURI:    true,
+		LogMethod: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			c.Logger().Infof("method=%s, uri=%s, status=%d", v.Method, v.URI, v.Status)
+			return nil
+		},
 	}))
 
 	e.Renderer = NewTemplateRenderer()
