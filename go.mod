@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo-jwt/v4 v4.4.0
-	github.com/labstack/echo/v4 v4.14.0
+	github.com/labstack/echo/v4 v4.15.0
 	github.com/labstack/gommon v0.4.2
 	go.mongodb.org/mongo-driver v1.17.6
 	golang.org/x/crypto v0.46.0
