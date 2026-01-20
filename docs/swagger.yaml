@@ -1,0 +1,656 @@
+basePath: /api/v1
+definitions:
+  data.LoginRequest:
+    properties:
+      identifier:
+        example: johndoe
+        minLength: 5
+        type: string
+      password:
+        example: P@ssw0rd!
+        type: string
+    required:
+    - identifier
+    - password
+    type: object
+  data.PasswordResetConfirmRequest:
+    properties:
+      new_password:
+        example: NewP@ssw0rd!
+        type: string
+      token:
+        example: 123e4567-e89b-12d3-a456-426614174000
+        type: string
+    required:
+    - new_password
+    - token
+    type: object
+  data.PasswordResetInitiateRequest:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+    required:
+    - email
+    type: object
+  data.RegisterRequest:
+    properties:
+      accept_terms:
+        example: true
+        type: boolean
+      birthdate:
+        example: "1990-01-01T00:00:00Z"
+        type: string
+      email:
+        example: john@example.com
+        type: string
+      first_name:
+        example: John
+        maxLength: 50
+        minLength: 2
+        type: string
+      last_name:
+        example: Doe
+        maxLength: 50
+        minLength: 2
+        type: string
+      password:
+        example: P@ssw0rd!
+        type: string
+      profile_picture:
+        example: data:image/png;base64,iVBORw0...
+        type: string
+      username:
+        example: johndoe
+        maxLength: 20
+        minLength: 5
+        type: string
+    required:
+    - accept_terms
+    - birthdate
+    - email
+    - first_name
+    - last_name
+    - password
+    - username
+    type: object
+  data.UpdateRequest:
+    properties:
+      birthdate:
+        example: "1990-01-01T00:00:00Z"
+        type: string
+      email:
+        example: john@example.com
+        type: string
+      first_name:
+        example: John
+        maxLength: 50
+        minLength: 2
+        type: string
+      last_name:
+        example: Doe
+        maxLength: 50
+        minLength: 2
+        type: string
+      password:
+        example: NewP@ssw0rd!
+        type: string
+      profile_picture:
+        example: data:image/png;base64,iVBORw0...
+        type: string
+      username:
+        example: johndoe
+        maxLength: 20
+        minLength: 5
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Authentication and user management REST API for Gordian
+  title: Gordian API
+  version: "1.0"
+paths:
+  /confirm-email/{token}:
+    get:
+      consumes:
+      - application/json
+      description: Confirm a user's email using a token sent by email. Renders a confirmation
+        page.
+      parameters:
+      - description: Confirmation token
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML page with success message
+          schema:
+            type: string
+        "400":
+          description: HTML page with failure message
+          schema:
+            type: string
+      summary: Confirm email address
+      tags:
+      - Auth
+  /delete:
+    delete:
+      description: Permanently delete the authenticated user's account
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Account deleted successfully'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: An error occurred while deleting your account or
+            Unexpected error during account deletion'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete user account
+      tags:
+      - Users
+  /fetchuser:
+    get:
+      description: Retrieve the authenticated user's profile
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: User profile retrieved successfully, user: user object'
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: Your user profile could not be retrieved'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: An error occurred while fetching your profile'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Fetch current user
+      tags:
+      - Users
+  /fetchuserbyid:
+    post:
+      consumes:
+      - application/json
+      description: Retrieve a user's public profile by user ID
+      parameters:
+      - description: '{\'
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: User fetched successfully, user: {username, first_name,
+            last_name, birthdate, date_joined}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 'message: Invalid request or validation errors or Invalid user
+            ID format'
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: The specified user could not be found'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: An error occurred while retrieving user information
+            or An unexpected error occurred'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Fetch user by ID
+      tags:
+      - Users
+  /health:
+    get:
+      description: Returns service health status and details
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'status: ok, details: health details'
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: 'status: error, message: Service health check failed'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Service health check
+      tags:
+      - Health
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate with username/email and password
+      parameters:
+      - description: Login request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Login successful, user: user object, tokens: token
+            pair'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 'message: Invalid request format or validation error'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 'message: Username or email not found or Incorrect password'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: 'message: Email not confirmed. Please confirm your email before
+            logging in.'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: 'message: Too many failed login attempts. Please try again
+            later.'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: An error occurred during login or Unable to create
+            session'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Login to the application
+      tags:
+      - Auth
+  /password-reset/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Confirm a password reset using a token and provide a new password
+      parameters:
+      - description: Password reset confirm request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.PasswordResetConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Password reset successfully'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 'message: Invalid request format, validation error, or invalid/expired
+            reset token'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Confirm password reset
+      tags:
+      - Auth
+  /password-reset/initiate:
+    post:
+      consumes:
+      - application/json
+      description: Send a password reset link to the provided email address
+      parameters:
+      - description: Password reset request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.PasswordResetInitiateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: If an account exists with this email, a reset link
+            will be sent'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 'message: Invalid request format or validation error'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: No user found with this email'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Failed to send password reset email; check if the
+            email is valid'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Initiate password reset
+      tags:
+      - Auth
+  /refresh:
+    get:
+      description: Exchange a valid refresh token for a new access/refresh token pair
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Tokens refreshed successfully, tokens: token pair'
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Unable to refresh authentication tokens'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Refresh authentication tokens
+      tags:
+      - Auth
+  /register:
+    post:
+      consumes:
+      - application/json
+      description: Create a new user account and send confirmation email
+      parameters:
+      - description: Registration request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Registration successful'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "206":
+          description: 'message: Registration successful, but confirmation email could
+            not be sent'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 'message: Invalid registration request format, validation error,
+            or invalid birthdate format'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 'message: Username or email is already registered'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Unable to process password or Registration failed'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register a new user
+      tags:
+      - Auth
+  /resend-confirmation-email:
+    get:
+      description: Resend the email confirmation to the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Confirmation email sent successfully'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: User profile not found'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 'message: Email is already confirmed'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: 'message: Too many confirmation email requests or Please wait
+            5 minutes before requesting another confirmation email'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Unable to resend confirmation email'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Resend confirmation email
+      tags:
+      - Users
+  /update:
+    patch:
+      consumes:
+      - application/json
+      description: Update fields of the authenticated user's profile
+      parameters:
+      - description: Update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Profile updated successfully, user: updated user
+            object'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 'message: Invalid request format, validation error, No update
+            fields provided, or Invalid birthdate format'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: Your user profile could not be found'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 'message: Username is already taken or Email is already registered'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Unable to process password update, An error occurred
+            while updating your profile, An error occurred while updating your profile
+            picture, or Unable to check uniqueness of username or email'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Users
+    put:
+      consumes:
+      - application/json
+      description: Update fields of the authenticated user's profile
+      parameters:
+      - description: Update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/data.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: Profile updated successfully, user: updated user
+            object'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 'message: Invalid request format, validation error, No update
+            fields provided, or Invalid birthdate format'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: 'message: Unauthorized (handled by middleware)'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: 'message: Your user profile could not be found'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: 'message: Username is already taken or Email is already registered'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: 'message: Unable to process password update, An error occurred
+            while updating your profile, An error occurred while updating your profile
+            picture, or Unable to check uniqueness of username or email'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Users
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
