@@ -158,9 +158,23 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 
 	updateFields := bson.M{}
 	if user.Username != "" {
+		count, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, bson.M{"username": user.Username, "_id": bson.M{"$ne": userID}})
+		if err != nil {
+			return nil, fmt.Errorf("failed to check username uniqueness: %v", err)
+		}
+		if count > 0 {
+			return nil, fmt.Errorf("username already exists")
+		}
 		updateFields["username"] = user.Username
 	}
 	if user.Email != "" {
+		count, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, bson.M{"email": user.Email, "_id": bson.M{"$ne": userID}})
+		if err != nil {
+			return nil, fmt.Errorf("failed to check email uniqueness: %v", err)
+		}
+		if count > 0 {
+			return nil, fmt.Errorf("email already exists")
+		}
 		updateFields["email"] = user.Email
 	}
 	if user.FirstName != "" {

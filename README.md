@@ -16,8 +16,9 @@ Protected routes require a valid JWT token in the Authorization header as a Bear
 
 ## Endpoints
 
+
 **POST** `/register` - Register a new user
-Registers a new user in the system and returns a JWT token.
+Registers a new user in the system. Returns a success message or a map of validation errors.
 
 **Request Body:**
 
@@ -27,31 +28,38 @@ Registers a new user in the system and returns a JWT token.
   "email": "user@example.com",
   "password": "securePassword",
   "first_name": "John",
-  "last_name": "Doe"
+  "last_name": "Doe",
+  "birthdate": "2000-01-01T00:00:00Z",
+  "accept_terms": true,
+  "profile_picture": "<base64 string>"
 }
 ```
 
-**Response:**
+**Success Response:**
 
 ```json
 {
-  "message": "Registration successful",
-  "user": {
-    "id": "643f1c77d4fdd441ed3f2991",
-    "username": "user123",
-    "email": "user@example.com",
-    "first_name": "John",
-    "last_name": "Doe",
-    "date_joined": "2023-09-29T12:34:56Z"
-  },
-  "tokens": {
-    "access_token": "<access_token>",
-    "access_created_at": "2023-09-29T12:34:56Z",
-    "expires_at": "2023-09-29T12:34:56Z",
-    "refresh_token": "<refresh_token>",
-    "refresh_created_at": "2023-09-29T12:34:56Z",
-    "refresh_expires_at": "2023-09-29T12:34:56Z"
+  "message": "Registration successful"
+}
+```
+
+**Validation Error Response:**
+
+```json
+{
+  "errors": {
+    "username": "username must be at least 5 characters",
+    "email": "invalid email format",
+    "password": "password must contain at least one uppercase, lowercase, number, or special character"
   }
+}
+```
+
+**Conflict Response:**
+
+```json
+{
+  "message": "Username or email is already registered"
 }
 ```
 
@@ -88,19 +96,20 @@ register(newUser)
   .catch(error => console.error(error));
 ```
 
+
 **POST** `/login` - Login a user
-Logs in a user and returns a JWT token.
+Logs in a user and returns user info and tokens. Returns validation errors or authentication errors as appropriate.
 
 **Request Body:**
 
 ```json
 {
-  "username": "john_doe",
+  "identifier": "john_doe", // username or email
   "password": "password123"
 }
 ```
 
-**Response:**
+**Success Response:**
 
 ```json
 {
@@ -123,6 +132,36 @@ Logs in a user and returns a JWT token.
   }
 }
 ```
+
+**Validation Error Response:**
+
+```json
+{
+  "errors": {
+    "identifier": "identifier is required",
+    "password": "password must contain at least one uppercase, lowercase, number, or special character"
+  }
+}
+```
+
+**Authentication Error Response:**
+
+```json
+{
+  "message": "Username or email not found"
+}
+// or
+{
+  "message": "Incorrect password"
+}
+// or
+{
+  "message": "Email not confirmed. Please confirm your email before logging in."
+}
+// or
+{
+  "message": "Too many failed login attempts. Please try again later."
+}
 
 **Example Usage:**
 
@@ -149,11 +188,9 @@ login('john_doe', 'password123')
   .catch(error => console.error(error));
 ```
 
-**PATCH** `/update` - Partially Update user details
 
-**PUT** `/update` - Fully Update user details
-
-Updates a user's details and returns the new user info.
+**PATCH/PUT** `/update` - Update user details
+Updates a user's details. Returns updated user info or validation errors.
 
 **Request Body:**
 
@@ -163,15 +200,17 @@ Updates a user's details and returns the new user info.
   "email": "john.doe.full@example.com",
   "password": "new_password",
   "first_name": "John",
-  "last_name": "Doe"
+  "last_name": "Doe",
+  "birthdate": "2000-01-01T00:00:00Z",
+  "profile_picture": "<base64 string>"
 }
 ```
 
-**Response:**
+**Success Response:**
 
 ```json
 {
-  "message": "User updated successfully",
+  "message": "Profile updated successfully",
   "user": {
     "id": "615f2e0a6c6d5c0e1a1e4a01",
     "username": "john_doe_full",
@@ -182,6 +221,28 @@ Updates a user's details and returns the new user info.
   }
 }
 ```
+
+**Validation Error Response:**
+
+```json
+{
+  "errors": {
+    "email": "invalid email format",
+    "username": "username must be at least 5 characters"
+  }
+}
+```
+
+**Conflict Response:**
+
+```json
+{
+  "message": "Username is already taken"
+}
+// or
+{
+  "message": "Email is already registered"
+}
 
 **Example Usage:**
 
@@ -217,19 +278,20 @@ updateUser('your_access_token_here', UpdatedUser)
   .catch(error => console.error(error));
 ```
 
+
 **DELETE** `/delete` - Deletes a user
-Deletes a user from the system returns a simple confirmation message.
+Deletes a user from the system. Requires authentication.
 
 **Request:**
 
 ***Authorization Header:***
 `Authorization: Bearer <your_access_token_here>`
 
-**Response:**
+**Success Response:**
 
 ```json
 {
-  "message": "User deleted successfully"
+  "message": "Account deleted successfully"
 }
 ```
 
@@ -257,28 +319,97 @@ deleteUser('your_access_token_here')
   .catch(error => console.error(error));
 ```
 
+
 **GET** `/refresh` - Refreshes an access token
-Refreshes an access token and returns a new access token.
+Refreshes an access token and returns new tokens. Requires a valid refresh token.
 
 **Request:**
 
 ***Authorization Header:***
 `Authorization: Bearer <your_refresh_token_here>`
 
-**Response:**
+**Success Response:**
 
 ```json
 {
-  "message": "Token refreshed successfully",
+  "message": "Tokens refreshed successfully",
   "tokens": {
     "access_token": "<new_access_token>",
     "access_created_at": "2023-10-22T14:48:00Z",
-    "expires_at": "2023-10-22T15:48:00Z",
+    "access_expires_at": "2023-10-22T15:48:00Z",
     "refresh_token": "<new_refresh_token>",
     "refresh_created_at": "2023-10-22T14:48:00Z",
     "refresh_expires_at": "2023-10-29T14:48:00Z"
+  }
 }
 ```
+
+**Password Reset**
+
+**POST** `/password-reset/initiate` - Initiate password reset
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Success Response:**
+```json
+{
+  "message": "If an account exists with this email, a reset link will be sent"
+}
+```
+
+**Validation Error Response:**
+```json
+{
+  "errors": {
+    "email": "invalid email format"
+  }
+}
+```
+
+**POST** `/password-reset/confirm` - Confirm password reset
+
+**Request Body:**
+```json
+{
+  "token": "<reset_token>",
+  "new_password": "newPassword123!"
+}
+```
+
+**Success Response:**
+```json
+{
+  "message": "Password reset successfully"
+}
+```
+
+**Validation Error Response:**
+```json
+{
+  "errors": {
+    "token": "invalid token format",
+    "new_password": "password must contain at least one uppercase, lowercase, number, or special character"
+  }
+}
+```
+
+### Error Handling
+
+All validation errors are returned as an `errors` object mapping field names to error messages. Authentication and other errors are returned as a `message` string.
+
+### Security & Best Practices
+
+- All sensitive endpoints are protected by JWT authentication.
+- Email confirmation is required before login.
+- Brute-force protection is enforced on login (rate limiting by IP and identifier).
+- Passwords must meet complexity requirements.
+- Email and username uniqueness is enforced on registration and update.
+- All error responses are designed for easy frontend parsing.
 
 ### License
 
