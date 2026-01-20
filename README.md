@@ -6,6 +6,10 @@ This is the API documentation for the Gordian API. The API is a RESTful API that
 
 https://gordian.onrender.com/api/v1
 
+## API Documentation UI
+
+- The interactive Swagger UI is exposed at the `/docs` route under the API base path. For example, visit `https://gordian.onrender.com/api/v1/docs` to view the API documentation and try endpoints.
+
 ## Authentication
 
 Protected routes require a valid JWT token in the Authorization header as a Bearer token.
