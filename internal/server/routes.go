@@ -15,8 +15,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
+	echoSwagger "github.com/swaggo/echo-swagger"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
+	_ "github.com/mAmineChniti/Gordian/docs"
 	"github.com/mAmineChniti/Gordian/internal/data"
 )
 
@@ -73,6 +75,11 @@ func (s *Server) RegisterRoutes() http.Handler {
 		v1.DELETE("/delete", s.Delete, s.JWTMiddleware())
 		v1.GET("/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
 		v1.GET("/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
+
+		v1.GET("/docs/*", echoSwagger.WrapHandler)
+		v1.GET("/docs", func(c echo.Context) error {
+			return c.Redirect(http.StatusMovedPermanently, "/api/v1/docs/index.html")
+		})
 	}
 
 	e.RouteNotFound("/*", func(c echo.Context) error {
@@ -84,6 +91,18 @@ func (s *Server) RegisterRoutes() http.Handler {
 	return e
 }
 
+// PasswordResetInitiate godoc
+// @Summary Initiate password reset
+// @Description Send a password reset link to the provided email address
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body data.PasswordResetInitiateRequest true "Password reset request"
+// @Success 200 {object} map[string]string "message: If an account exists with this email, a reset link will be sent"
+// @Failure 400 {object} map[string]string "message: Invalid request format or validation error"
+// @Failure 404 {object} map[string]string "message: No user found with this email"
+// @Failure 500 {object} map[string]string "message: Failed to send password reset email; check if the email is valid"
+// @Router /password-reset/initiate [post]
 func (s *Server) PasswordResetInitiate(c echo.Context) error {
 	var req data.PasswordResetInitiateRequest
 	if err := c.Bind(&req); err != nil {
@@ -115,6 +134,16 @@ func (s *Server) PasswordResetInitiate(c echo.Context) error {
 	})
 }
 
+// PasswordResetConfirm godoc
+// @Summary Confirm password reset
+// @Description Confirm a password reset using a token and provide a new password
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body data.PasswordResetConfirmRequest true "Password reset confirm request"
+// @Success 200 {object} map[string]string "message: Password reset successfully"
+// @Failure 400 {object} map[string]string "message: Invalid request format, validation error, or invalid/expired reset token"
+// @Router /password-reset/confirm [post]
 func (s *Server) PasswordResetConfirm(c echo.Context) error {
 	var req data.PasswordResetConfirmRequest
 	if err := c.Bind(&req); err != nil {
@@ -141,6 +170,19 @@ func (s *Server) PasswordResetConfirm(c echo.Context) error {
 	})
 }
 
+// Register godoc
+// @Summary Register a new user
+// @Description Create a new user account and send confirmation email
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body data.RegisterRequest true "Registration request"
+// @Success 200 {object} map[string]string "message: Registration successful"
+// @Failure 206 {object} map[string]string "message: Registration successful, but confirmation email could not be sent"
+// @Failure 400 {object} map[string]string "message: Invalid registration request format, validation error, or invalid birthdate format"
+// @Failure 409 {object} map[string]string "message: Username or email is already registered"
+// @Failure 500 {object} map[string]string "message: Unable to process password or Registration failed"
+// @Router /register [post]
 func (s *Server) Register(c echo.Context) error {
 	var req data.RegisterRequest
 	if err := c.Bind(&req); err != nil {
@@ -186,6 +228,20 @@ const (
 	blockDuration    = 15 * time.Minute
 )
 
+// Login godoc
+// @Summary Login to the application
+// @Description Authenticate with username/email and password
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body data.LoginRequest true "Login request"
+// @Success 200 {object} map[string]any "message: Login successful, user: user object, tokens: token pair"
+// @Failure 400 {object} map[string]string "message: Invalid request format or validation error"
+// @Failure 401 {object} map[string]string "message: Username or email not found or Incorrect password"
+// @Failure 403 {object} map[string]string "message: Email not confirmed. Please confirm your email before logging in."
+// @Failure 429 {object} map[string]string "message: Too many failed login attempts. Please try again later."
+// @Failure 500 {object} map[string]string "message: An error occurred during login or Unable to create session"
+// @Router /login [post]
 func (s *Server) Login(c echo.Context) error {
 	var req data.LoginRequest
 	if err := c.Bind(&req); err != nil {
@@ -252,6 +308,16 @@ func (s *Server) Login(c echo.Context) error {
 	})
 }
 
+// ConfirmEmail godoc
+// @Summary Confirm email address
+// @Description Confirm a user's email using a token sent by email. Renders a confirmation page.
+// @Tags Auth
+// @Accept  json
+// @Produce  html
+// @Param token path string true "Confirmation token"
+// @Success 200 {string} string "HTML page with success message"
+// @Failure 400 {string} string "HTML page with failure message"
+// @Router /confirm-email/{token} [get]
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
 	c.Logger().Infof("Received email confirmation token: %s", token)
@@ -275,6 +341,19 @@ func (s *Server) ConfirmEmail(c echo.Context) error {
 	})
 }
 
+// reConfirmEmail godoc
+// @Summary Resend confirmation email
+// @Description Resend the email confirmation to the authenticated user
+// @Tags Users
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]string "message: Confirmation email sent successfully"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 404 {object} map[string]string "message: User profile not found"
+// @Failure 409 {object} map[string]string "message: Email is already confirmed"
+// @Failure 429 {object} map[string]string "message: Too many confirmation email requests or Please wait 5 minutes before requesting another confirmation email"
+// @Failure 500 {object} map[string]string "message: Unable to resend confirmation email"
+// @Router /resend-confirmation-email [get]
 func (s *Server) reConfirmEmail(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	err := s.db.ResendConfirmationEmail(userID)
@@ -310,6 +389,17 @@ func (s *Server) reConfirmEmail(c echo.Context) error {
 	})
 }
 
+// FetchUser godoc
+// @Summary Fetch current user
+// @Description Retrieve the authenticated user's profile
+// @Tags Users
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]any "message: User profile retrieved successfully, user: user object"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 404 {object} map[string]string "message: Your user profile could not be retrieved"
+// @Failure 500 {object} map[string]string "message: An error occurred while fetching your profile"
+// @Router /fetchuser [get]
 func (s *Server) FetchUser(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	user, err := s.db.GetUser(userID)
@@ -323,6 +413,20 @@ func (s *Server) FetchUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"message": "User profile retrieved successfully", "user": user})
 }
 
+// FetchUserById godoc
+// @Summary Fetch user by ID
+// @Description Retrieve a user's public profile by user ID
+// @Tags Users
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body object true "{\"user_id\": \"<objectId>\"}"
+// @Success 200 {object} map[string]any "message: User fetched successfully, user: {username, first_name, last_name, birthdate, date_joined}"
+// @Failure 400 {object} map[string]any "message: Invalid request or validation errors or Invalid user ID format"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 404 {object} map[string]string "message: The specified user could not be found"
+// @Failure 500 {object} map[string]string "message: An error occurred while retrieving user information or An unexpected error occurred"
+// @Router /fetchuserbyid [post]
 func (s *Server) FetchUserById(c echo.Context) error {
 	var req struct {
 		ID string `json:"user_id" validate:"required"`
@@ -393,6 +497,22 @@ func (s *Server) FetchUserById(c echo.Context) error {
 	})
 }
 
+// Update godoc
+// @Summary Update user profile
+// @Description Update fields of the authenticated user's profile
+// @Tags Users
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body data.UpdateRequest true "Update request"
+// @Success 200 {object} map[string]any "message: Profile updated successfully, user: updated user object"
+// @Failure 400 {object} map[string]string "message: Invalid request format, validation error, No update fields provided, or Invalid birthdate format"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 404 {object} map[string]string "message: Your user profile could not be found"
+// @Failure 409 {object} map[string]string "message: Username is already taken or Email is already registered"
+// @Failure 500 {object} map[string]string "message: Unable to process password update, An error occurred while updating your profile, An error occurred while updating your profile picture, or Unable to check uniqueness of username or email"
+// @Router /update [put]
+// @Router /update [patch]
 func (s *Server) Update(c echo.Context) error {
 	var req data.UpdateRequest
 	if err := c.Bind(&req); err != nil {
@@ -443,6 +563,16 @@ func (s *Server) Update(c echo.Context) error {
 	})
 }
 
+// Delete godoc
+// @Summary Delete user account
+// @Description Permanently delete the authenticated user's account
+// @Tags Users
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]string "message: Account deleted successfully"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 500 {object} map[string]string "message: An error occurred while deleting your account or Unexpected error during account deletion"
+// @Router /delete [delete]
 func (s *Server) Delete(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	err := s.db.DeleteUser(userID)
@@ -462,6 +592,16 @@ func (s *Server) Delete(c echo.Context) error {
 	})
 }
 
+// RefreshTokenHandler godoc
+// @Summary Refresh authentication tokens
+// @Description Exchange a valid refresh token for a new access/refresh token pair
+// @Tags Auth
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]any "message: Tokens refreshed successfully, tokens: token pair"
+// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
+// @Failure 500 {object} map[string]string "message: Unable to refresh authentication tokens"
+// @Router /refresh [get]
 func (s *Server) RefreshTokenHandler(c echo.Context) error {
 	userID := c.Get("user_id").(primitive.ObjectID)
 	tokens, err := s.db.CreateSession(userID)
@@ -477,6 +617,14 @@ func (s *Server) RefreshTokenHandler(c echo.Context) error {
 	})
 }
 
+// healthHandler godoc
+// @Summary Service health check
+// @Description Returns service health status and details
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]any "status: ok, details: health details"
+// @Failure 503 {object} map[string]any "status: error, message: Service health check failed"
+// @Router /health [get]
 func (s *Server) healthHandler(c echo.Context) error {
 	status, err := s.db.Health()
 	if err != nil {

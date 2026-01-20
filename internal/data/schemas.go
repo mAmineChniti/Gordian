@@ -26,29 +26,29 @@ type User struct {
 }
 
 type LoginRequest struct {
-	Identifier string `json:"identifier" validate:"required,min=5"`
-	Password   string `json:"password" validate:"required,password_complexity"`
+	Identifier string `json:"identifier" validate:"required,min=5" example:"johndoe"`
+	Password   string `json:"password" validate:"required,password_complexity" example:"P@ssw0rd!"`
 }
 
 type RegisterRequest struct {
-	Username       string `json:"username" validate:"required,min=5,max=20"`
-	Email          string `json:"email" validate:"required,email"`
-	Password       string `json:"password" validate:"required,password_complexity"`
-	FirstName      string `json:"first_name" validate:"required,min=2,max=50"`
-	LastName       string `json:"last_name" validate:"required,min=2,max=50"`
-	Birthdate      string `json:"birthdate" validate:"required,rfc3339"`
-	AcceptTerms    bool   `json:"accept_terms" validate:"required,eq=true"`
-	ProfilePicture string `json:"profile_picture,omitempty" validate:"omitempty,base64_max_10mb"`
+	Username       string `json:"username" validate:"required,min=5,max=20" example:"johndoe"`
+	Email          string `json:"email" validate:"required,email" example:"john@example.com"`
+	Password       string `json:"password" validate:"required,password_complexity" example:"P@ssw0rd!"`
+	FirstName      string `json:"first_name" validate:"required,min=2,max=50" example:"John"`
+	LastName       string `json:"last_name" validate:"required,min=2,max=50" example:"Doe"`
+	Birthdate      string `json:"birthdate" validate:"required,rfc3339" example:"1990-01-01T00:00:00Z"`
+	AcceptTerms    bool   `json:"accept_terms" validate:"required,eq=true" example:"true"`
+	ProfilePicture string `json:"profile_picture,omitempty" validate:"omitempty,base64_max_10mb" example:"data:image/png;base64,iVBORw0..."`
 }
 
 type UpdateRequest struct {
-	Username       string `json:"username,omitempty" validate:"omitempty,min=5,max=20"`
-	Email          string `json:"email,omitempty" validate:"omitempty,email"`
-	Password       string `json:"password,omitempty" validate:"omitempty,password_complexity"`
-	FirstName      string `json:"first_name,omitempty" validate:"omitempty,min=2,max=50"`
-	LastName       string `json:"last_name,omitempty" validate:"omitempty,min=2,max=50"`
-	Birthdate      string `json:"birthdate,omitempty" validate:"omitempty,rfc3339"`
-	ProfilePicture string `json:"profile_picture,omitempty" validate:"omitempty,base64_max_10mb"`
+	Username       string `json:"username,omitempty" validate:"omitempty,min=5,max=20" example:"johndoe"`
+	Email          string `json:"email,omitempty" validate:"omitempty,email" example:"john@example.com"`
+	Password       string `json:"password,omitempty" validate:"omitempty,password_complexity" example:"NewP@ssw0rd!"`
+	FirstName      string `json:"first_name,omitempty" validate:"omitempty,min=2,max=50" example:"John"`
+	LastName       string `json:"last_name,omitempty" validate:"omitempty,min=2,max=50" example:"Doe"`
+	Birthdate      string `json:"birthdate,omitempty" validate:"omitempty,rfc3339" example:"1990-01-01T00:00:00Z"`
+	ProfilePicture string `json:"profile_picture,omitempty" validate:"omitempty,base64_max_10mb" example:"data:image/png;base64,iVBORw0..."`
 }
 
 type SessionTokens struct {
@@ -72,10 +72,10 @@ type LoginRegisterResponse struct {
 }
 
 type PasswordResetInitiateRequest struct {
-	Email string `json:"email" validate:"required,email"`
+	Email string `json:"email" validate:"required,email" example:"john@example.com"`
 }
 
 type PasswordResetConfirmRequest struct {
-	Token       string `json:"token" validate:"required,uuid"`
-	NewPassword string `json:"new_password" validate:"required,password_complexity"`
+	Token       string `json:"token" validate:"required,uuid" example:"123e4567-e89b-12d3-a456-426614174000"`
+	NewPassword string `json:"new_password" validate:"required,password_complexity" example:"NewP@ssw0rd!"`
 }
