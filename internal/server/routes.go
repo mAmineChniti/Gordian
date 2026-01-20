@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/golang-jwt/jwt/v5"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
@@ -177,6 +178,14 @@ func (s *Server) Register(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Registration successful"})
 }
 
+var loginAttempts = make(map[string][]time.Time)
+
+const (
+	maxLoginAttempts = 5
+	loginWindow      = 10 * time.Minute
+	blockDuration    = 15 * time.Minute
+)
+
 func (s *Server) Login(c echo.Context) error {
 	var req data.LoginRequest
 	if err := c.Bind(&req); err != nil {
@@ -191,9 +200,31 @@ func (s *Server) Login(c echo.Context) error {
 		})
 	}
 
+	ip := c.RealIP()
+	key := ip + ":" + req.Identifier
+	now := time.Now()
+	attempts := loginAttempts[key]
+	var recent []time.Time
+	for _, t := range attempts {
+		if now.Sub(t) < loginWindow {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= maxLoginAttempts {
+		lastAttempt := recent[len(recent)-1]
+		if now.Sub(lastAttempt) < blockDuration {
+			return c.JSON(http.StatusTooManyRequests, map[string]string{"message": "Too many failed login attempts. Please try again later."})
+		}
+		recent = []time.Time{}
+	}
+	loginAttempts[key] = recent
+
 	user, err := s.db.FindUser(&req)
 	if err != nil {
 		c.Logger().Error(err.Error())
+		if strings.Contains(err.Error(), "user not found") || strings.Contains(err.Error(), "invalid password") {
+			loginAttempts[key] = append(loginAttempts[key], now)
+		}
 		if strings.Contains(err.Error(), "user not found") {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Username or email not found"})
 		}
@@ -202,6 +233,11 @@ func (s *Server) Login(c echo.Context) error {
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred during login"})
 	}
+
+	if !user.EmailConfirmed {
+		return c.JSON(http.StatusForbidden, map[string]string{"message": "Email not confirmed. Please confirm your email before logging in."})
+	}
+	delete(loginAttempts, key)
 
 	tokens, err := s.db.CreateSession(user.ID)
 	if err != nil {
@@ -297,12 +333,26 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
 	}
 
-	// Validate the request struct
-	if err := data.Validate.Struct(req); err != nil {
-		c.Logger().Errorf("Validation error: %v", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": "User ID is required",
-		})
+	type userIdRequest struct {
+		ID string `json:"user_id" validate:"required"`
+	}
+	reqObj := userIdRequest{ID: req.ID}
+	if errors := data.Validate.Struct(reqObj); errors != nil {
+		var validationErrors = make(map[string]string)
+		if ve, ok := errors.(validator.ValidationErrors); ok {
+			for _, e := range ve {
+				field := e.Field()
+				switch e.Tag() {
+				case "required":
+					validationErrors[field] = field + " is required"
+				default:
+					validationErrors[field] = e.Error()
+				}
+			}
+		} else {
+			validationErrors["general"] = errors.Error()
+		}
+		return c.JSON(http.StatusBadRequest, map[string]any{"errors": validationErrors})
 	}
 
 	objID, err := primitive.ObjectIDFromHex(req.ID)
@@ -366,20 +416,22 @@ func (s *Server) Update(c echo.Context) error {
 		switch {
 		case strings.Contains(errStr, "user not found"):
 			return c.JSON(http.StatusNotFound, map[string]string{"message": "Your user profile could not be found"})
-
 		case strings.Contains(errStr, "no fields to update"):
 			return c.JSON(http.StatusBadRequest, map[string]string{"message": "No update fields provided"})
-
 		case strings.Contains(errStr, "password hashing failed"):
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to process password update"})
-
 		case strings.Contains(errStr, "failed to parse birthdate"):
 			return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid birthdate format"})
-
 		case strings.Contains(errStr, "failed to update user"):
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile"})
 		case strings.Contains(errStr, "failed to update profile picture"):
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile picture"})
+		case strings.Contains(errStr, "username already exists"):
+			return c.JSON(http.StatusConflict, map[string]string{"message": "Username is already taken"})
+		case strings.Contains(errStr, "email already exists"):
+			return c.JSON(http.StatusConflict, map[string]string{"message": "Email is already registered"})
+		case strings.Contains(errStr, "failed to check username uniqueness") || strings.Contains(errStr, "failed to check email uniqueness"):
+			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to check uniqueness of username or email"})
 		default:
 			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unexpected error during profile update"})
 		}
@@ -441,6 +493,9 @@ func (s *Server) healthHandler(c echo.Context) error {
 }
 
 func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
+	if len(jwtSecret) == 0 {
+		panic("JWT secret is not set. Set JWTSECRET environment variable.")
+	}
 	config := echojwt.Config{
 		SigningKey: jwtSecret,
 		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
@@ -448,9 +503,15 @@ func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 			if strings.HasPrefix(auth, "Bearer ") {
 				tokenString = strings.TrimPrefix(auth, "Bearer ")
 			}
-
+			if tokenString == "" {
+				c.Logger().Error("Missing JWT token")
+				return nil, errors.New("missing token")
+			}
 			claims := &jwt.RegisteredClaims{}
 			token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+				if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+				}
 				return jwtSecret, nil
 			})
 			if err != nil {
@@ -485,6 +546,9 @@ func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
 }
 
 func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
+	if len(jwtSecret) == 0 {
+		panic("JWT secret is not set. Set JWTSECRET environment variable.")
+	}
 	config := echojwt.Config{
 		SigningKey: jwtSecret,
 		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
@@ -492,9 +556,15 @@ func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
 			if strings.HasPrefix(auth, "Bearer ") {
 				tokenString = strings.TrimPrefix(auth, "Bearer ")
 			}
-
+			if tokenString == "" {
+				c.Logger().Error("Missing JWT token")
+				return nil, errors.New("missing token")
+			}
 			claims := &jwt.RegisteredClaims{}
 			token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+				if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+				}
 				return jwtSecret, nil
 			})
 			if err != nil {

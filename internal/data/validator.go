@@ -91,118 +91,143 @@ func validateBase64Max10MB(fl validator.FieldLevel) bool {
 	return sizeInBytes <= 10*1024*1024 // 10MB
 }
 
-func ValidateRegisterRequest(req *RegisterRequest) error {
+func ValidateRegisterRequest(req *RegisterRequest) map[string]string {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
 		if errors.As(err, &validationErrors) {
+			errorMap := make(map[string]string)
 			for _, e := range validationErrors {
+				field := e.Field()
 				switch e.Tag() {
 				case "required":
-					return fmt.Errorf("%s is required", e.Field())
+					errorMap[field] = fmt.Sprintf("%s is required", field)
 				case "min":
-					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at least %s characters", field, e.Param())
 				case "max":
-					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at most %s characters", field, e.Param())
 				case "email":
-					return errors.New("invalid email format")
+					errorMap[field] = "invalid email format"
 				case "rfc3339":
-					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
+					errorMap[field] = "invalid birthdate. Must be in RFC3339 format and user must be 18 or older"
 				case "eq":
-					return errors.New("you must accept the terms and conditions")
+					errorMap[field] = "you must accept the terms and conditions"
 				case "base64_max_10mb":
-					return errors.New("profile picture exceeds 10MB limit")
+					errorMap[field] = "profile picture exceeds 10MB limit"
 				}
 			}
+			if len(errorMap) > 0 {
+				return errorMap
+			}
 		}
-		return err
+		return map[string]string{"general": err.Error()}
 	}
 	return nil
 }
 
-func ValidateLoginRequest(req *LoginRequest) error {
+func ValidateLoginRequest(req *LoginRequest) map[string]string {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
 		if errors.As(err, &validationErrors) {
+			errorMap := make(map[string]string)
 			for _, e := range validationErrors {
+				field := e.Field()
 				switch e.Tag() {
 				case "required":
-					return fmt.Errorf("%s is required", e.Field())
+					errorMap[field] = fmt.Sprintf("%s is required", field)
 				case "min":
-					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at least %s characters", field, e.Param())
 				case "containsany":
-					return errors.New("password must contain at least one uppercase, lowercase, number, or special character")
+					errorMap[field] = "password must contain at least one uppercase, lowercase, number, or special character"
 				}
 			}
+			if len(errorMap) > 0 {
+				return errorMap
+			}
 		}
-		return err
+		return map[string]string{"general": err.Error()}
 	}
 	return nil
 }
 
-func ValidateUpdateRequest(req *UpdateRequest) error {
+func ValidateUpdateRequest(req *UpdateRequest) map[string]string {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
 		if errors.As(err, &validationErrors) {
+			errorMap := make(map[string]string)
 			for _, e := range validationErrors {
+				field := e.Field()
 				switch e.Tag() {
 				case "omitempty":
 					continue
 				case "min":
-					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at least %s characters", field, e.Param())
 				case "max":
-					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at most %s characters", field, e.Param())
 				case "email":
-					return errors.New("invalid email format")
+					errorMap[field] = "invalid email format"
 				case "rfc3339":
-					return errors.New("invalid birthdate. Must be in RFC3339 format and user must be 18 or older")
+					errorMap[field] = "invalid birthdate. Must be in RFC3339 format and user must be 18 or older"
 				case "base64_max_10mb":
-					return errors.New("profile picture exceeds 10MB limit")
+					errorMap[field] = "profile picture exceeds 10MB limit"
 				}
 			}
+			if len(errorMap) > 0 {
+				return errorMap
+			}
 		}
-		return err
+		return map[string]string{"general": err.Error()}
 	}
 	return nil
 }
 
-func ValidatePasswordResetInitiateRequest(req *PasswordResetInitiateRequest) error {
+func ValidatePasswordResetInitiateRequest(req *PasswordResetInitiateRequest) map[string]string {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
 		if errors.As(err, &validationErrors) {
+			errorMap := make(map[string]string)
 			for _, e := range validationErrors {
+				field := e.Field()
 				switch e.Tag() {
 				case "required":
-					return fmt.Errorf("%s is required", e.Field())
+					errorMap[field] = fmt.Sprintf("%s is required", field)
 				case "email":
-					return errors.New("invalid email format")
+					errorMap[field] = "invalid email format"
 				}
 			}
+			if len(errorMap) > 0 {
+				return errorMap
+			}
 		}
-		return err
+		return map[string]string{"general": err.Error()}
 	}
 	return nil
 }
 
-func ValidatePasswordResetConfirmRequest(req *PasswordResetConfirmRequest) error {
+func ValidatePasswordResetConfirmRequest(req *PasswordResetConfirmRequest) map[string]string {
 	if err := Validate.Struct(req); err != nil {
 		var validationErrors validator.ValidationErrors
 		if errors.As(err, &validationErrors) {
+			errorMap := make(map[string]string)
 			for _, e := range validationErrors {
+				field := e.Field()
 				switch e.Tag() {
 				case "required":
-					return fmt.Errorf("%s is required", e.Field())
+					errorMap[field] = fmt.Sprintf("%s is required", field)
 				case "uuid":
-					return errors.New("invalid token format")
+					errorMap[field] = "invalid token format"
 				case "min":
-					return fmt.Errorf("%s must be at least %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at least %s characters", field, e.Param())
 				case "max":
-					return fmt.Errorf("%s must be at most %s characters", e.Field(), e.Param())
+					errorMap[field] = fmt.Sprintf("%s must be at most %s characters", field, e.Param())
 				case "containsany":
-					return errors.New("password must contain at least one uppercase, lowercase, number, or special character")
+					errorMap[field] = "password must contain at least one uppercase, lowercase, number, or special character"
 				}
 			}
+			if len(errorMap) > 0 {
+				return errorMap
+			}
 		}
-		return err
+		return map[string]string{"general": err.Error()}
 	}
 	return nil
 }
