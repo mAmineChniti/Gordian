@@ -12,7 +12,7 @@ require (
 	github.com/labstack/gommon v0.4.2
 	github.com/swaggo/echo-swagger v1.4.1
 	github.com/swaggo/swag v1.16.6
-	go.mongodb.org/mongo-driver v1.17.6
+	go.mongodb.org/mongo-driver v1.17.7
 	golang.org/x/crypto v0.47.0
 )
 
