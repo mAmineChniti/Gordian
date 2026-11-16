@@ -24,10 +24,6 @@ import (
 
 const usersCollection = "users"
 
-// dummyHash is generated at startup with the configured bcrypt cost; the
-// constant is retained for documentation and tests.
-const dummyHash = "$2a$12$ggGH744lVDO/luOo09sKGeukPXsNRoID9A.fWX1XAbl4KoOlT30Qi"
-
 var caseInsensitive = options.Collation{Locale: "en", Strength: 2}
 
 type Service interface {

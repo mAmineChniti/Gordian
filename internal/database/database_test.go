@@ -91,10 +91,10 @@ func TestNewSessionTokens(t *testing.T) {
 		if claims.ID == "" {
 			t.Error("expected a unique token id")
 		}
-		if claims.ExpiresAt == nil || !claims.ExpiresAt.Time.Equal(now.Add(tc.ttl)) {
+		if claims.ExpiresAt == nil || !claims.ExpiresAt.Equal(now.Add(tc.ttl)) {
 			t.Errorf("unexpected expiry for %s token: %v", tc.name, claims.ExpiresAt)
 		}
-		if claims.IssuedAt == nil || !claims.IssuedAt.Time.Equal(now) {
+		if claims.IssuedAt == nil || !claims.IssuedAt.Equal(now) {
 			t.Errorf("unexpected issued-at for %s token: %v", tc.name, claims.IssuedAt)
 		}
 	}

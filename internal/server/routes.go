@@ -55,12 +55,9 @@ func (s *Server) RegisterRoutes() http.Handler {
 		HSTSExcludeSubdomains: false,
 		ReferrerPolicy:        "no-referrer",
 	}))
-	allowCredentials := true
-	if len(s.cfg.CORSAllowedOrigins) == 1 && s.cfg.CORSAllowedOrigins[0] == "*" {
-		// Browsers reject wildcard origins combined with credentials, and the
-		// API uses bearer tokens rather than cookies.
-		allowCredentials = false
-	}
+	// Browsers reject wildcard origins combined with credentials, and the
+	// API uses bearer tokens rather than cookies.
+	allowCredentials := len(s.cfg.CORSAllowedOrigins) != 1 || s.cfg.CORSAllowedOrigins[0] != "*"
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:     s.cfg.CORSAllowedOrigins,
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
