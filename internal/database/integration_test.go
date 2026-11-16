@@ -12,7 +12,7 @@ import (
 
 	"github.com/mAmineChniti/Gordian/internal/config"
 	"github.com/mAmineChniti/Gordian/internal/data"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func integrationConfig(t *testing.T) *config.Config {
@@ -27,7 +27,7 @@ func integrationConfig(t *testing.T) *config.Config {
 
 	return &config.Config{
 		MongoURI:                  uri,
-		DBName:                    "gordian_it_" + primitive.NewObjectID().Hex(),
+		DBName:                    "gordian_it_" + bson.NewObjectID().Hex(),
 		JWTSecret:                 []byte(strings.Repeat("s", 64)),
 		BaseURL:                   "https://api.example.com",
 		AccessTokenTTL:            15 * time.Minute,

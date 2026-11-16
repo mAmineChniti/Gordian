@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const (
@@ -22,24 +22,24 @@ type Claims struct {
 }
 
 type User struct {
-	ID                        primitive.ObjectID `json:"id" bson:"_id"`
-	Username                  string             `json:"username" bson:"username"`
-	Email                     string             `json:"email" bson:"email"`
-	Hash                      string             `json:"-" bson:"hash"`
-	FirstName                 string             `json:"first_name" bson:"first_name"`
-	LastName                  string             `json:"last_name" bson:"last_name"`
-	Birthdate                 time.Time          `json:"birthdate" bson:"birthdate"`
-	ProfilePicture            string             `json:"profile_picture" bson:"profile_picture"`
-	EmailConfirmed            bool               `json:"email_confirmed" bson:"email_confirmed"`
-	AcceptTerms               bool               `json:"accept_terms" bson:"accept_terms"`
-	DateJoined                time.Time          `json:"date_joined" bson:"date_joined"`
-	EmailToken                string             `json:"-" bson:"email_token,omitempty"`
-	EmailTokenExpiry          time.Time          `json:"-" bson:"email_token_expiry,omitempty"`
-	EmailConfirmationAttempts int                `json:"-" bson:"email_confirmation_attempts"`
-	LastEmailAttemptTime      time.Time          `json:"-" bson:"last_email_attempt_time"`
-	PasswordResetToken        string             `json:"-" bson:"password_reset_token,omitempty"`
-	PasswordResetExpiry       time.Time          `json:"-" bson:"password_reset_expiry,omitempty"`
-	TokenVersion              int                `json:"-" bson:"token_version"`
+	ID                        bson.ObjectID `json:"id" bson:"_id"`
+	Username                  string        `json:"username" bson:"username"`
+	Email                     string        `json:"email" bson:"email"`
+	Hash                      string        `json:"-" bson:"hash"`
+	FirstName                 string        `json:"first_name" bson:"first_name"`
+	LastName                  string        `json:"last_name" bson:"last_name"`
+	Birthdate                 time.Time     `json:"birthdate" bson:"birthdate"`
+	ProfilePicture            string        `json:"profile_picture" bson:"profile_picture"`
+	EmailConfirmed            bool          `json:"email_confirmed" bson:"email_confirmed"`
+	AcceptTerms               bool          `json:"accept_terms" bson:"accept_terms"`
+	DateJoined                time.Time     `json:"date_joined" bson:"date_joined"`
+	EmailToken                string        `json:"-" bson:"email_token,omitempty"`
+	EmailTokenExpiry          time.Time     `json:"-" bson:"email_token_expiry,omitempty"`
+	EmailConfirmationAttempts int           `json:"-" bson:"email_confirmation_attempts"`
+	LastEmailAttemptTime      time.Time     `json:"-" bson:"last_email_attempt_time"`
+	PasswordResetToken        string        `json:"-" bson:"password_reset_token,omitempty"`
+	PasswordResetExpiry       time.Time     `json:"-" bson:"password_reset_expiry,omitempty"`
+	TokenVersion              int           `json:"-" bson:"token_version"`
 }
 
 type LoginRequest struct {

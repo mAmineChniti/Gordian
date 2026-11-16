@@ -16,24 +16,24 @@ import (
 	"github.com/mAmineChniti/Gordian/internal/config"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"github.com/mAmineChniti/Gordian/internal/database"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type fakeDB struct {
 	findUserFn           func(*data.LoginRequest) (*data.User, error)
-	getUserFn            func(primitive.ObjectID) (*data.User, error)
-	getTokenVersionFn    func(primitive.ObjectID) (int, error)
+	getUserFn            func(bson.ObjectID) (*data.User, error)
+	getTokenVersionFn    func(bson.ObjectID) (int, error)
 	createUserFn         func(*data.RegisterRequest) error
-	updateUserFn         func(primitive.ObjectID, *data.UpdateRequest) (*data.User, error)
-	deleteUserFn         func(primitive.ObjectID) error
-	createSessionFn      func(primitive.ObjectID) (*data.SessionTokens, error)
+	updateUserFn         func(bson.ObjectID, *data.UpdateRequest) (*data.User, error)
+	deleteUserFn         func(bson.ObjectID) error
+	createSessionFn      func(bson.ObjectID) (*data.SessionTokens, error)
 	confirmEmailFn       func(string) error
-	resendConfirmationFn func(primitive.ObjectID) error
+	resendConfirmationFn func(bson.ObjectID) error
 	resendByEmailFn      func(string) error
 	deleteUnconfirmedFn  func() error
 	initiateResetFn      func(string) error
 	resetPasswordFn      func(string, string) error
-	revokeSessionsFn     func(primitive.ObjectID) error
+	revokeSessionsFn     func(bson.ObjectID) error
 	healthFn             func() (map[string]string, error)
 	closeFn              func(context.Context) error
 }
@@ -45,14 +45,14 @@ func (f *fakeDB) FindUser(req *data.LoginRequest) (*data.User, error) {
 	return nil, database.ErrInvalidCredentials
 }
 
-func (f *fakeDB) GetUser(id primitive.ObjectID) (*data.User, error) {
+func (f *fakeDB) GetUser(id bson.ObjectID) (*data.User, error) {
 	if f.getUserFn != nil {
 		return f.getUserFn(id)
 	}
 	return nil, database.ErrUserNotFound
 }
 
-func (f *fakeDB) GetTokenVersion(id primitive.ObjectID) (int, error) {
+func (f *fakeDB) GetTokenVersion(id bson.ObjectID) (int, error) {
 	if f.getTokenVersionFn != nil {
 		return f.getTokenVersionFn(id)
 	}
@@ -66,21 +66,21 @@ func (f *fakeDB) CreateUser(req *data.RegisterRequest) error {
 	return nil
 }
 
-func (f *fakeDB) UpdateUser(id primitive.ObjectID, req *data.UpdateRequest) (*data.User, error) {
+func (f *fakeDB) UpdateUser(id bson.ObjectID, req *data.UpdateRequest) (*data.User, error) {
 	if f.updateUserFn != nil {
 		return f.updateUserFn(id, req)
 	}
 	return &data.User{ID: id, Username: "user", EmailConfirmed: true}, nil
 }
 
-func (f *fakeDB) DeleteUser(id primitive.ObjectID) error {
+func (f *fakeDB) DeleteUser(id bson.ObjectID) error {
 	if f.deleteUserFn != nil {
 		return f.deleteUserFn(id)
 	}
 	return nil
 }
 
-func (f *fakeDB) CreateSession(id primitive.ObjectID) (*data.SessionTokens, error) {
+func (f *fakeDB) CreateSession(id bson.ObjectID) (*data.SessionTokens, error) {
 	if f.createSessionFn != nil {
 		return f.createSessionFn(id)
 	}
@@ -94,7 +94,7 @@ func (f *fakeDB) ConfirmEmail(token string) error {
 	return nil
 }
 
-func (f *fakeDB) ResendConfirmationEmail(id primitive.ObjectID) error {
+func (f *fakeDB) ResendConfirmationEmail(id bson.ObjectID) error {
 	if f.resendConfirmationFn != nil {
 		return f.resendConfirmationFn(id)
 	}
@@ -129,7 +129,7 @@ func (f *fakeDB) ResetPassword(token, newPassword string) error {
 	return nil
 }
 
-func (f *fakeDB) RevokeSessions(id primitive.ObjectID) error {
+func (f *fakeDB) RevokeSessions(id bson.ObjectID) error {
 	if f.revokeSessionsFn != nil {
 		return f.revokeSessionsFn(id)
 	}
@@ -234,7 +234,7 @@ func decodeJSON[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 	return result
 }
 
-func signedToken(t *testing.T, cfg *config.Config, userID primitive.ObjectID, tokenType string, version int) string {
+func signedToken(t *testing.T, cfg *config.Config, userID bson.ObjectID, tokenType string, version int) string {
 	t.Helper()
 	now := time.Now().UTC()
 	claims := &data.Claims{
@@ -247,7 +247,7 @@ func signedToken(t *testing.T, cfg *config.Config, userID primitive.ObjectID, to
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
-			ID:        primitive.NewObjectID().Hex(),
+			ID:        bson.NewObjectID().Hex(),
 		},
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(cfg.JWTSecret)
@@ -313,7 +313,7 @@ func TestLoginRateLimit(t *testing.T) {
 
 func TestLoginRejectsUnconfirmedEmail(t *testing.T) {
 	db := &fakeDB{findUserFn: func(*data.LoginRequest) (*data.User, error) {
-		return &data.User{ID: primitive.NewObjectID(), Username: "user", EmailConfirmed: false}, nil
+		return &data.User{ID: bson.NewObjectID(), Username: "user", EmailConfirmed: false}, nil
 	}}
 	handler, _ := newTestHandler(t, db)
 
@@ -459,10 +459,10 @@ func TestPasswordResetConfirmInvalidToken(t *testing.T) {
 }
 
 func TestDeleteMissingAccountReturns404(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		deleteUserFn:      func(primitive.ObjectID) error { return database.ErrUserNotFound },
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		deleteUserFn:      func(bson.ObjectID) error { return database.ErrUserNotFound },
 	}
 	handler, cfg := newTestHandler(t, db)
 
@@ -473,11 +473,11 @@ func TestDeleteMissingAccountReturns404(t *testing.T) {
 }
 
 func TestFetchUserByIDReturnsLimitedProfile(t *testing.T) {
-	userID := primitive.NewObjectID()
-	targetID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
+	targetID := bson.NewObjectID()
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		getUserFn: func(id primitive.ObjectID) (*data.User, error) {
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		getUserFn: func(id bson.ObjectID) (*data.User, error) {
 			if id != targetID {
 				return nil, database.ErrUserNotFound
 			}
@@ -514,8 +514,8 @@ func TestFetchUserByIDReturnsLimitedProfile(t *testing.T) {
 }
 
 func TestJWTRejectsRevokedToken(t *testing.T) {
-	userID := primitive.NewObjectID()
-	db := &fakeDB{getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 2, nil }}
+	userID := bson.NewObjectID()
+	db := &fakeDB{getTokenVersionFn: func(bson.ObjectID) (int, error) { return 2, nil }}
 	handler, cfg := newTestHandler(t, db)
 
 	rec := doRequest(t, handler, http.MethodGet, "/api/v1/fetchuser", nil, authHeader(signedToken(t, cfg, userID, data.TokenTypeAccess, 1)))
@@ -525,8 +525,8 @@ func TestJWTRejectsRevokedToken(t *testing.T) {
 }
 
 func TestJWTRejectsDeletedUser(t *testing.T) {
-	userID := primitive.NewObjectID()
-	db := &fakeDB{getTokenVersionFn: func(primitive.ObjectID) (int, error) {
+	userID := bson.NewObjectID()
+	db := &fakeDB{getTokenVersionFn: func(bson.ObjectID) (int, error) {
 		return 0, database.ErrUserNotFound
 	}}
 	handler, cfg := newTestHandler(t, db)
@@ -538,7 +538,7 @@ func TestJWTRejectsDeletedUser(t *testing.T) {
 }
 
 func TestJWTRejectsWrongTokenType(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	db := &fakeDB{}
 	handler, cfg := newTestHandler(t, db)
 
@@ -549,10 +549,10 @@ func TestJWTRejectsWrongTokenType(t *testing.T) {
 }
 
 func TestRefreshRejectsUnconfirmedEmail(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		getUserFn: func(primitive.ObjectID) (*data.User, error) {
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		getUserFn: func(bson.ObjectID) (*data.User, error) {
 			return &data.User{ID: userID, EmailConfirmed: false}, nil
 		},
 	}
@@ -565,11 +565,11 @@ func TestRefreshRejectsUnconfirmedEmail(t *testing.T) {
 }
 
 func TestLogoutRevokesSessions(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	called := false
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		revokeSessionsFn: func(id primitive.ObjectID) error {
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		revokeSessionsFn: func(id bson.ObjectID) error {
 			called = true
 			if id != userID {
 				t.Errorf("unexpected user ID: %s", id.Hex())
@@ -589,10 +589,10 @@ func TestLogoutRevokesSessions(t *testing.T) {
 }
 
 func TestUpdateRequiresCurrentPassword(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		updateUserFn: func(primitive.ObjectID, *data.UpdateRequest) (*data.User, error) {
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		updateUserFn: func(bson.ObjectID, *data.UpdateRequest) (*data.User, error) {
 			return nil, database.ErrCurrentPasswordNeeded
 		},
 	}
@@ -607,10 +607,10 @@ func TestUpdateRequiresCurrentPassword(t *testing.T) {
 }
 
 func TestUpdatePasswordReturnsNewTokens(t *testing.T) {
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	db := &fakeDB{
-		getTokenVersionFn: func(primitive.ObjectID) (int, error) { return 0, nil },
-		updateUserFn: func(id primitive.ObjectID, req *data.UpdateRequest) (*data.User, error) {
+		getTokenVersionFn: func(bson.ObjectID) (int, error) { return 0, nil },
+		updateUserFn: func(id bson.ObjectID, req *data.UpdateRequest) (*data.User, error) {
 			return &data.User{ID: id, Username: "user", EmailConfirmed: true}, nil
 		},
 	}

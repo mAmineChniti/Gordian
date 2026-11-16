@@ -13,7 +13,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
 	echoSwagger "github.com/swaggo/echo-swagger"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	_ "github.com/mAmineChniti/Gordian/docs"
 	"github.com/mAmineChniti/Gordian/internal/data"
@@ -210,7 +210,7 @@ func (s *Server) jwtMiddleware(tokenType string) echo.MiddlewareFunc {
 				return unauthorized(c)
 			}
 
-			userID, err := primitive.ObjectIDFromHex(claims.Subject)
+			userID, err := bson.ObjectIDFromHex(claims.Subject)
 			if err != nil {
 				return unauthorized(c)
 			}
@@ -251,8 +251,8 @@ func unauthorized(c echo.Context) error {
 	return c.JSON(http.StatusUnauthorized, data.MessageResponse{Message: "Unauthorized"})
 }
 
-func userIDFromContext(c echo.Context) (primitive.ObjectID, bool) {
-	userID, ok := c.Get(contextUserIDKey).(primitive.ObjectID)
+func userIDFromContext(c echo.Context) (bson.ObjectID, bool) {
+	userID, ok := c.Get(contextUserIDKey).(bson.ObjectID)
 	return userID, ok
 }
 
@@ -691,7 +691,7 @@ func (s *Server) FetchUserById(c echo.Context) error {
 		return validationErrorResponse(c, err)
 	}
 
-	objectID, err := primitive.ObjectIDFromHex(req.ID)
+	objectID, err := bson.ObjectIDFromHex(req.ID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "Invalid user ID format"})
 	}
@@ -793,7 +793,7 @@ func (s *Server) Update(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-func (s *Server) attachTokens(userID primitive.ObjectID, response *data.UserResponse, passwordChanged bool) {
+func (s *Server) attachTokens(userID bson.ObjectID, response *data.UserResponse, passwordChanged bool) {
 	if !passwordChanged {
 		return
 	}

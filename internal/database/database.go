@@ -16,10 +16,9 @@ import (
 	"github.com/mAmineChniti/Gordian/internal/config"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"github.com/mAmineChniti/Gordian/internal/services"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -33,19 +32,19 @@ var caseInsensitive = options.Collation{Locale: "en", Strength: 2}
 
 type Service interface {
 	FindUser(user *data.LoginRequest) (*data.User, error)
-	GetUser(userID primitive.ObjectID) (*data.User, error)
-	GetTokenVersion(userID primitive.ObjectID) (int, error)
+	GetUser(userID bson.ObjectID) (*data.User, error)
+	GetTokenVersion(userID bson.ObjectID) (int, error)
 	CreateUser(user *data.RegisterRequest) error
-	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
-	DeleteUser(userID primitive.ObjectID) error
-	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
+	UpdateUser(userID bson.ObjectID, user *data.UpdateRequest) (*data.User, error)
+	DeleteUser(userID bson.ObjectID) error
+	CreateSession(userID bson.ObjectID) (*data.SessionTokens, error)
 	ConfirmEmail(token string) error
-	ResendConfirmationEmail(userID primitive.ObjectID) error
+	ResendConfirmationEmail(userID bson.ObjectID) error
 	ResendConfirmationEmailByEmail(email string) error
 	DeleteUnconfirmedUsers() error
 	InitiatePasswordReset(email string) error
 	ResetPassword(token, newPassword string) error
-	RevokeSessions(userID primitive.ObjectID) error
+	RevokeSessions(userID bson.ObjectID) error
 	Health() (map[string]string, error)
 	Close(ctx context.Context) error
 }
@@ -103,7 +102,7 @@ func newWithEmailService(cfg *config.Config, emailService services.EmailService)
 	connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := mongo.Connect(connectCtx, clientOptions)
+	client, err := mongo.Connect(clientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("connect to mongodb: %w", err)
 	}
@@ -199,7 +198,7 @@ func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 	return &foundUser, nil
 }
 
-func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
+func (s *service) GetUser(userID bson.ObjectID) (*data.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -215,7 +214,7 @@ func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
 	return &foundUser, nil
 }
 
-func (s *service) GetTokenVersion(userID primitive.ObjectID) (int, error) {
+func (s *service) GetTokenVersion(userID bson.ObjectID) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -274,7 +273,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 	now := time.Now().UTC()
 	rawToken := uuid.NewString()
 	endUser := data.User{
-		ID:                        primitive.NewObjectID(),
+		ID:                        bson.NewObjectID(),
 		Username:                  username,
 		Email:                     email,
 		Hash:                      string(hash),
@@ -308,7 +307,7 @@ func (s *service) CreateUser(user *data.RegisterRequest) error {
 	return nil
 }
 
-func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error) {
+func (s *service) UpdateUser(userID bson.ObjectID, user *data.UpdateRequest) (*data.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -456,7 +455,7 @@ func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest
 	return &updatedUser, nil
 }
 
-func (s *service) DeleteUser(userID primitive.ObjectID) error {
+func (s *service) DeleteUser(userID bson.ObjectID) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -472,7 +471,7 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 	return nil
 }
 
-func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
+func (s *service) CreateSession(userID bson.ObjectID) (*data.SessionTokens, error) {
 	tokenVersion, err := s.GetTokenVersion(userID)
 	if err != nil {
 		return nil, err
@@ -481,7 +480,7 @@ func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens,
 	return newSessionTokens(userID, tokenVersion, s.jwtSecret, time.Now().UTC(), s.cfg.AccessTokenTTL, s.cfg.RefreshTokenTTL)
 }
 
-func newSessionTokens(userID primitive.ObjectID, tokenVersion int, secret []byte, now time.Time, accessTTL, refreshTTL time.Duration) (*data.SessionTokens, error) {
+func newSessionTokens(userID bson.ObjectID, tokenVersion int, secret []byte, now time.Time, accessTTL, refreshTTL time.Duration) (*data.SessionTokens, error) {
 	accessExpiresAt := now.Add(accessTTL)
 	refreshExpiresAt := now.Add(refreshTTL)
 
@@ -573,7 +572,7 @@ func (s *service) ConfirmEmail(token string) error {
 	return nil
 }
 
-func (s *service) ResendConfirmationEmail(userID primitive.ObjectID) error {
+func (s *service) ResendConfirmationEmail(userID bson.ObjectID) error {
 	user, err := s.GetUser(userID)
 	if err != nil {
 		return err
@@ -751,7 +750,7 @@ func (s *service) ResetPassword(token, newPassword string) error {
 	return nil
 }
 
-func (s *service) RevokeSessions(userID primitive.ObjectID) error {
+func (s *service) RevokeSessions(userID bson.ObjectID) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

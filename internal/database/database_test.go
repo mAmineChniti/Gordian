@@ -9,8 +9,8 @@ import (
 	"github.com/mAmineChniti/Gordian/internal/config"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"github.com/mAmineChniti/Gordian/internal/services"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type testEmailService struct {
@@ -43,7 +43,7 @@ var _ services.EmailService = (*testEmailService)(nil)
 
 func TestNewSessionTokens(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	userID := primitive.NewObjectID()
+	userID := bson.NewObjectID()
 	secret := []byte("test-secret-that-is-long-enough-for-hs256")
 
 	tokens, err := newSessionTokens(userID, 7, secret, now, 15*time.Minute, 7*24*time.Hour)
