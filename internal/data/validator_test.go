@@ -1,55 +1,93 @@
 package data
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestValidatePasswordComplexity(t *testing.T) {
-	good := "Aa1!aaaa"
-	if err := Validate.Var(good, "password_complexity"); err != nil {
-		t.Fatalf("expected valid password, got error: %v", err)
+	if err := Validate.Var("Aa1!aaaa", "password_complexity"); err != nil {
+		t.Fatalf("expected valid password, got: %v", err)
 	}
 
-	bad := "short"
-	if err := Validate.Var(bad, "password_complexity"); err == nil {
-		t.Fatalf("expected invalid password, got nil")
+	for _, bad := range []string{
+		"short",
+		"alllowercase1!",
+		"ALLUPPERCASE1!",
+		"NoDigits!",
+		"NoSpecial1",
+		strings.Repeat("Aa1!", 20), // longer than bcrypt's 72-byte input
+	} {
+		if err := Validate.Var(bad, "password_complexity"); err == nil {
+			t.Errorf("expected password %q to be rejected", bad)
+		}
 	}
 }
 
 func TestValidateBirthdate(t *testing.T) {
-	// adult
 	adult := time.Now().AddDate(-20, 0, 0).Format(time.RFC3339)
 	if err := Validate.Var(adult, "rfc3339"); err != nil {
-		t.Fatalf("expected valid birthdate, got error: %v", err)
+		t.Fatalf("expected valid birthdate, got: %v", err)
 	}
 
-	// underage
-	under := time.Now().AddDate(-17, 0, 0).Format(time.RFC3339)
-	if err := Validate.Var(under, "rfc3339"); err == nil {
-		t.Fatalf("expected underage birthdate to be invalid, got nil")
+	underage := time.Now().AddDate(-17, 0, 0).Format(time.RFC3339)
+	if err := Validate.Var(underage, "rfc3339"); err == nil {
+		t.Fatal("expected underage birthdate to be invalid")
+	}
+
+	if err := Validate.Var("not-a-date", "rfc3339"); err == nil {
+		t.Fatal("expected malformed birthdate to be invalid")
 	}
 }
 
-func TestValidateBase64Max10MB(t *testing.T) {
-	// empty should pass (optional field)
-	if err := Validate.Var("", "base64_max_10mb"); err != nil {
-		t.Fatalf("empty base64 should be valid, got: %v", err)
+func TestValidateUsername(t *testing.T) {
+	for _, good := range []string{"user", "user.name", "user-name", "user_name", "u1"} {
+		if err := Validate.Var(good, "username"); err != nil {
+			t.Errorf("expected username %q to be valid, got: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"user@example.com", ".user", "-user", "user name", "user!"} {
+		if err := Validate.Var(bad, "username"); err == nil {
+			t.Errorf("expected username %q to be rejected", bad)
+		}
+	}
+}
+
+func TestProfilePictureSize(t *testing.T) {
+	if size, err := ProfilePictureSize(""); err != nil || size != 0 {
+		t.Fatalf("expected empty picture to be valid, got size=%d err=%v", size, err)
 	}
 
-	// small string should pass
-	small := strings.Repeat("A", 100)
-	if err := Validate.Var(small, "base64_max_10mb"); err != nil {
-		t.Fatalf("small base64 should be valid, got: %v", err)
+	raw := base64.StdEncoding.EncodeToString([]byte("smallpic"))
+	if size, err := ProfilePictureSize(raw); err != nil || size != int64(len("smallpic")) {
+		t.Fatalf("expected decoded size, got size=%d err=%v", size, err)
 	}
 
-	// large string that exceeds 10MB when decoded
-	// len(base64Str)*3/4 > 10*1024*1024 => len > (10*1024*1024*4)/3
-	// add a safety margin so integer division can't accidentally pass
-	limit := (10*1024*1024*4)/3 + 1000
-	big := strings.Repeat("A", limit)
-	if err := Validate.Var(big, "base64_max_10mb"); err == nil {
-		t.Fatalf("expected large base64 to be invalid, got nil")
+	if _, err := ProfilePictureSize("data:image/png;base64," + raw); err != nil {
+		t.Fatalf("expected data URL to be valid, got: %v", err)
+	}
+	if _, err := ProfilePictureSize("data:image/svg+xml;base64," + raw); err == nil {
+		t.Fatal("expected unsupported image type to be rejected")
+	}
+	if _, err := ProfilePictureSize("not base64!!!"); err == nil {
+		t.Fatal("expected invalid base64 to be rejected")
+	}
+
+	tooLarge := strings.Repeat("A", int((MaxProfilePictureBytes*4)/3)+16)
+	if _, err := ProfilePictureSize(tooLarge); err == nil {
+		t.Fatal("expected oversized encoded image to be rejected")
+	}
+}
+
+func TestValidationErrorsUsesJSONNames(t *testing.T) {
+	err := Validate.Struct(&RegisterRequest{})
+	errs := ValidationErrors(err)
+	if _, ok := errs["username"]; !ok {
+		t.Fatalf("expected json field name username, got: %v", errs)
+	}
+	if _, ok := errs["Username"]; ok {
+		t.Fatalf("did not expect Go field name in errors: %v", errs)
 	}
 }

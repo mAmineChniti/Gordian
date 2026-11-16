@@ -1,0 +1,10 @@
+.git
+.github
+.air.toml
+.env
+.env.*
+!.env.example
+main
+tmp
+coverage.out
+*.md

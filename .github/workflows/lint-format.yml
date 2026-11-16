@@ -1,4 +1,4 @@
-name: Lint, and Format
+name: Lint and Format
 
 on:
   push:
@@ -8,30 +8,37 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
   lint-format:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Setup Checkout
+      - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.5'
+          go-version: "1.27.4"
+          cache: true
 
-      - name: Setup golangci-lint
+      - name: Check gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-
-      - name: Run gofmt
-        run: |
-          gofmt -l .
-          if [ $? -eq 0 ]; then
-            echo "Formatting completed successfully."
-          else
-            echo "Formatting encountered an error."
-            exit 1
-          fi
+          args: --timeout=5m

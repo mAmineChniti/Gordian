@@ -1,28 +1,25 @@
-FROM golang:1.25.5 AS builder
+FROM golang:1.27.4 AS builder
 
-WORKDIR /gordian-build
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends make ca-certificates && \
-    update-ca-certificates && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN make build
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gordian ./cmd/api
 
-FROM scratch
+FROM gcr.io/distroless/static-debian12:nonroot AS prod
 
 WORKDIR /app
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /gordian-build/main /app/
-COPY --from=builder /gordian-build/internal/templates /app/internal/templates
+ENV APP_TEMPLATES_DIR=/app/internal/templates
 
-EXPOSE 8080
+COPY --from=builder /out/gordian /app/gordian
+COPY --from=builder /src/internal/templates /app/internal/templates
 
-ENTRYPOINT ["/app/main"]
+EXPOSE 10000
+
+USER nonroot:nonroot
+
+ENTRYPOINT ["/app/gordian"]

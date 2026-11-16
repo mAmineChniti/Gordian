@@ -8,47 +8,89 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
-      PORT: ${{ secrets.PORT }}
-      DB_USERNAME: ${{ secrets.DB_USERNAME }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-      JWTSECRET: ${{ secrets.JWTSECRET }}
-      DEBUG: ${{ secrets.DEBUG }}
+      PORT: "10000"
+      JWTSECRET: "ci-only-jwt-secret-replace-in-production-0123456789"
+      APP_BASE_URL: "http://127.0.0.1:10000"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+      MONGODB_URI: "mongodb://127.0.0.1:27017"
+      DB_NAME: "gordian_ci"
+      TRUST_PROXY: "false"
+      DEBUG: "false"
 
     steps:
-      - name: Setup Checkout
+      - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.5'
+          go-version: "1.27.4"
+          cache: true
 
       - name: Install dependencies
         run: go mod download
 
-      - name: Test
+      - name: Verify formatting
+        run: make fmt
+
+      - name: Vet
+        run: make vet
+
+      - name: Unit and handler tests
         run: make test
+
+      - name: Integration tests
+        run: make itest
+
+      - name: Vulnerability scan
+        run: make vuln
 
       - name: Build
         run: make build
 
-      - name: Run Server
+      - name: Start server
         run: |
-          ./main &
-          sleep 30
+          ./main > server.log 2>&1 &
+          echo $! > server.pid
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:10000/api/v1/health >/dev/null; then
+              echo "Server is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy"
+          cat server.log
+          exit 1
 
-      - name: Send Request
+      - name: Health check smoke test
         run: |
-          API_URL="http://127.0.0.1:${{ secrets.PORT }}/api/v1/health"
-          STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" $API_URL)
-          if [ "$STATUS_CODE" -eq 200 ]; then
-            echo "API is deployed and responding with status code 200 (OK)"
-          else
-            echo "Error: API deployment failed. Received status code: $STATUS_CODE"
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/api/v1/health)
+          if [ "$status" != "200" ]; then
+            echo "Health check returned $status"
             exit 1
+          fi
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" || true
           fi

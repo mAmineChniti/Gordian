@@ -2,15 +2,18 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
-	"os"
+	"log"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	_ "github.com/joho/godotenv/autoload"
-	"github.com/labstack/gommon/log"
+	"github.com/mAmineChniti/Gordian/internal/config"
 	"github.com/mAmineChniti/Gordian/internal/data"
 	"github.com/mAmineChniti/Gordian/internal/services"
 	"go.mongodb.org/mongo-driver/bson"
@@ -20,67 +23,177 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const usersCollection = "users"
+
+// dummyHash is generated at startup with the configured bcrypt cost; the
+// constant is retained for documentation and tests.
+const dummyHash = "$2a$12$ggGH744lVDO/luOo09sKGeukPXsNRoID9A.fWX1XAbl4KoOlT30Qi"
+
+var caseInsensitive = options.Collation{Locale: "en", Strength: 2}
+
 type Service interface {
 	FindUser(user *data.LoginRequest) (*data.User, error)
 	GetUser(userID primitive.ObjectID) (*data.User, error)
+	GetTokenVersion(userID primitive.ObjectID) (int, error)
 	CreateUser(user *data.RegisterRequest) error
 	UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error)
 	DeleteUser(userID primitive.ObjectID) error
 	CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error)
-	ConfirmEmail(token string) (bool, string)
+	ConfirmEmail(token string) error
 	ResendConfirmationEmail(userID primitive.ObjectID) error
+	ResendConfirmationEmailByEmail(email string) error
 	DeleteUnconfirmedUsers() error
 	InitiatePasswordReset(email string) error
 	ResetPassword(token, newPassword string) error
+	RevokeSessions(userID primitive.ObjectID) error
 	Health() (map[string]string, error)
+	Close(ctx context.Context) error
 }
 
 type service struct {
-	db           *mongo.Client
-	emailService services.EmailService
+	client    *mongo.Client
+	db        *mongo.Database
+	email     services.EmailService
+	jwtSecret []byte
+	cfg       *config.Config
+	dummyHash []byte
 }
 
-var (
-	dbUsername       = os.Getenv("DB_USERNAME")
-	dbPassword       = os.Getenv("DB_PASSWORD")
-	connectionString = os.Getenv("DB_CONNECTION_STRING")
-	jwtSecret        = []byte(os.Getenv("JWTSECRET"))
-)
+func New(cfg *config.Config) (Service, error) {
+	if cfg == nil {
+		return nil, errors.New("config is required")
+	}
 
-func New() Service {
-	uri := fmt.Sprintf("mongodb+srv://%s:%s%s", dbUsername, dbPassword, connectionString)
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
-
+	emailService, err := newEmailService(cfg)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return &service{
-		db:           client,
-		emailService: services.NewGmailSMTPEmailService(),
+
+	return newWithEmailService(cfg, emailService)
+}
+
+// newWithEmailService allows tests to inject an email implementation while
+// keeping the production constructor limited to environment configuration.
+func newWithEmailService(cfg *config.Config, emailService services.EmailService) (Service, error) {
+	if cfg == nil {
+		return nil, errors.New("config is required")
 	}
+	if emailService == nil {
+		return nil, errors.New("email service is required")
+	}
+
+	dummyHash, err := bcrypt.GenerateFromPassword([]byte("gordian-dummy-password"), cfg.BcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("generate dummy password hash: %w", err)
+	}
+
+	clientOptions := options.Client().
+		ApplyURI(cfg.MongoURI).
+		SetServerSelectionTimeout(10 * time.Second)
+
+	if cfg.DBUsername != "" && !uriHasCredentials(cfg.MongoURI) {
+		credential := options.Credential{
+			Username:   cfg.DBUsername,
+			Password:   cfg.DBPassword,
+			AuthSource: cfg.DBAuthSource,
+		}
+		clientOptions.SetAuth(credential)
+	}
+
+	connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(connectCtx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("connect to mongodb: %w", err)
+	}
+
+	if err := client.Ping(connectCtx, nil); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, fmt.Errorf("ping mongodb: %w", err)
+	}
+
+	svc := &service{
+		client:    client,
+		db:        client.Database(cfg.DBName),
+		email:     emailService,
+		jwtSecret: cfg.JWTSecret,
+		cfg:       cfg,
+		dummyHash: dummyHash,
+	}
+
+	if err := svc.ensureIndexes(); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, err
+	}
+
+	return svc, nil
+}
+
+func newEmailService(cfg *config.Config) (services.EmailService, error) {
+	if !cfg.EmailEnabled {
+		log.Println("email delivery disabled: GMAIL_USERNAME/GMAIL_APP_PASSWORD are not set")
+		return services.NewDisabledEmailService(), nil
+	}
+	return services.NewGmailSMTPEmailService(cfg.GmailUsername, cfg.GmailPassword, cfg.BaseURL)
+}
+
+func (s *service) ensureIndexes() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	usernameIndex := options.Index().
+		SetName("uniq_username").
+		SetUnique(true).
+		SetCollation(&caseInsensitive)
+	emailIndex := options.Index().
+		SetName("uniq_email").
+		SetUnique(true).
+		SetCollation(&caseInsensitive)
+
+	_, err := s.users().Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "username", Value: 1}}, Options: usernameIndex},
+		{Keys: bson.D{{Key: "email", Value: 1}}, Options: emailIndex},
+		{Keys: bson.D{{Key: "email_token", Value: 1}}, Options: options.Index().SetName("email_token_idx").SetSparse(true)},
+		{Keys: bson.D{{Key: "password_reset_token", Value: 1}}, Options: options.Index().SetName("password_reset_token_idx").SetSparse(true)},
+		{Keys: bson.D{{Key: "email_confirmed", Value: 1}, {Key: "date_joined", Value: 1}}, Options: options.Index().SetName("unconfirmed_cleanup_idx")},
+	})
+	if err != nil {
+		return fmt.Errorf("create mongodb indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *service) users() *mongo.Collection {
+	return s.db.Collection(usersCollection)
 }
 
 func (s *service) FindUser(req *data.LoginRequest) (*data.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var foundUser data.User
-	filter := bson.M{"username": req.Identifier}
+	identifier := strings.TrimSpace(req.Identifier)
+	filter := bson.M{"username": identifier}
+	opts := options.FindOne().SetCollation(&caseInsensitive)
 
-	if strings.Contains(req.Identifier, "@") {
-		filter = bson.M{"email": req.Identifier}
+	if strings.Contains(identifier, "@") {
+		filter = bson.M{"email": normalizeEmail(identifier)}
+		opts = options.FindOne().SetCollation(&caseInsensitive)
 	}
 
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, filter).Decode(&foundUser)
+	var foundUser data.User
+	err := s.users().FindOne(ctx, filter, opts).Decode(&foundUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found: %v", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Equalize the response time with the bcrypt comparison below.
+			_ = bcrypt.CompareHashAndPassword(s.dummyHash, []byte(req.Password))
+			return nil, ErrInvalidCredentials
 		}
-		return nil, fmt.Errorf("db error: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(foundUser.Hash), []byte(req.Password)); err != nil {
-		return nil, fmt.Errorf("invalid password: %v", err)
+		return nil, ErrInvalidCredentials
 	}
 
 	return &foundUser, nil
@@ -91,133 +204,253 @@ func (s *service) GetUser(userID primitive.ObjectID) (*data.User, error) {
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&foundUser)
+	err := s.users().FindOne(ctx, bson.M{"_id": userID}).Decode(&foundUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found: %v", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrUserNotFound
 		}
-		return nil, fmt.Errorf("db error: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
 	return &foundUser, nil
 }
 
-func (s *service) CreateUser(user *data.RegisterRequest) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *service) GetTokenVersion(userID primitive.ObjectID) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	filter := bson.M{"$or": []bson.M{{"username": user.Username}, {"email": user.Email}}}
-	foundUser, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, filter)
+
+	var result struct {
+		TokenVersion int `bson:"token_version"`
+	}
+	err := s.users().FindOne(
+		ctx,
+		bson.M{"_id": userID},
+		options.FindOne().SetProjection(bson.M{"token_version": 1}),
+	).Decode(&result)
 	if err != nil {
-		return fmt.Errorf("failed to check if user exists: %v", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return 0, ErrUserNotFound
+		}
+		return 0, fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
-	if foundUser > 0 {
-		return fmt.Errorf("user already exists")
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+
+	return result.TokenVersion, nil
+}
+
+func (s *service) CreateUser(user *data.RegisterRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	username := strings.TrimSpace(user.Username)
+	email := normalizeEmail(user.Email)
+
+	count, err := s.users().CountDocuments(ctx, bson.M{
+		"$or": []bson.M{
+			{"username": username},
+			{"email": email},
+		},
+	}, options.Count().SetCollation(&caseInsensitive))
 	if err != nil {
-		return fmt.Errorf("failed to hash password: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
+	if count > 0 {
+		return ErrUserExists
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), s.cfg.BcryptCost)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPasswordHashFailed, err)
+	}
+
 	birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 	if err != nil {
-		return fmt.Errorf("failed to parse birthdate: must be in ISO 8601 format (RFC3339)")
+		return fmt.Errorf("%w: must be in ISO 8601 format (RFC3339)", ErrInvalidBirthdate)
 	}
 
-	emailToken := uuid.New().String()
+	if err := s.checkProfilePicture(user.ProfilePicture); err != nil {
+		return err
+	}
 
+	now := time.Now().UTC()
+	rawToken := uuid.NewString()
 	endUser := data.User{
 		ID:                        primitive.NewObjectID(),
-		Username:                  user.Username,
-		Email:                     user.Email,
+		Username:                  username,
+		Email:                     email,
 		Hash:                      string(hash),
-		FirstName:                 user.FirstName,
-		LastName:                  user.LastName,
-		Birthdate:                 birthdate,
-		DateJoined:                time.Now(),
+		FirstName:                 strings.TrimSpace(user.FirstName),
+		LastName:                  strings.TrimSpace(user.LastName),
+		Birthdate:                 birthdate.UTC(),
+		DateJoined:                now,
 		EmailConfirmed:            false,
-		EmailToken:                emailToken,
+		EmailToken:                hashToken(rawToken),
+		EmailTokenExpiry:          now.Add(s.cfg.EmailConfirmationTokenTTL),
 		EmailConfirmationAttempts: 1,
-		LastEmailAttemptTime:      time.Now(),
+		LastEmailAttemptTime:      now,
 		AcceptTerms:               user.AcceptTerms,
 		ProfilePicture:            user.ProfilePicture,
-	}
-	_, err = s.db.Database("gordian").Collection("users").InsertOne(ctx, endUser)
-	if err != nil {
-		return fmt.Errorf("failed to insert user: %v", err)
+		TokenVersion:              0,
 	}
 
-	if err := s.emailService.SendConfirmationEmail(endUser.Email, emailToken); err != nil {
-		return fmt.Errorf("failed to send confirmation email: %v", err)
+	if _, err := s.users().InsertOne(ctx, endUser); err != nil {
+		if isDuplicateKey(err) {
+			return ErrUserExists
+		}
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+	log.Printf("audit: user registered user_id=%s", endUser.ID.Hex())
+
+	if err := s.email.SendConfirmationEmail(endUser.Email, rawToken); err != nil {
+		log.Printf("failed to send confirmation email for %s: %v", endUser.Email, err)
+		return fmt.Errorf("%w: %v", ErrEmailSendFailed, err)
 	}
 
 	return nil
 }
 
 func (s *service) UpdateUser(userID primitive.ObjectID, user *data.UpdateRequest) (*data.User, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	updateFields := bson.M{}
-	if user.Username != "" {
-		count, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, bson.M{"username": user.Username, "_id": bson.M{"$ne": userID}})
+	current, err := s.GetUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	newEmail := normalizeEmail(user.Email)
+	emailChanged := user.Email != "" && !strings.EqualFold(newEmail, current.Email)
+	passwordChanged := user.Password != ""
+
+	if emailChanged || passwordChanged {
+		if user.CurrentPassword == "" {
+			return nil, ErrCurrentPasswordNeeded
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(current.Hash), []byte(user.CurrentPassword)); err != nil {
+			return nil, ErrInvalidCurrentPassword
+		}
+	}
+
+	setFields := bson.M{}
+	incFields := bson.M{}
+	now := time.Now().UTC()
+
+	var confirmationToken string
+	if username := strings.TrimSpace(user.Username); username != "" {
+		count, err := s.users().CountDocuments(ctx, bson.M{
+			"username": username,
+			"_id":      bson.M{"$ne": userID},
+		}, options.Count().SetCollation(&caseInsensitive))
 		if err != nil {
-			return nil, fmt.Errorf("failed to check username uniqueness: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
 		}
 		if count > 0 {
-			return nil, fmt.Errorf("username already exists")
+			return nil, ErrUsernameTaken
 		}
-		updateFields["username"] = user.Username
+		setFields["username"] = username
 	}
-	if user.Email != "" {
-		count, err := s.db.Database("gordian").Collection("users").CountDocuments(ctx, bson.M{"email": user.Email, "_id": bson.M{"$ne": userID}})
+
+	if emailChanged {
+		count, err := s.users().CountDocuments(ctx, bson.M{
+			"email": newEmail,
+			"_id":   bson.M{"$ne": userID},
+		}, options.Count().SetCollation(&caseInsensitive))
 		if err != nil {
-			return nil, fmt.Errorf("failed to check email uniqueness: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
 		}
 		if count > 0 {
-			return nil, fmt.Errorf("email already exists")
+			return nil, ErrEmailTaken
 		}
-		updateFields["email"] = user.Email
+
+		confirmationToken = uuid.NewString()
+		setFields["email"] = newEmail
+		setFields["email_confirmed"] = false
+		setFields["email_token"] = hashToken(confirmationToken)
+		setFields["email_token_expiry"] = now.Add(s.cfg.EmailConfirmationTokenTTL)
+		setFields["email_confirmation_attempts"] = 1
+		setFields["last_email_attempt_time"] = now
 	}
-	if user.FirstName != "" {
-		updateFields["first_name"] = user.FirstName
+
+	if firstName := strings.TrimSpace(user.FirstName); firstName != "" {
+		setFields["first_name"] = firstName
 	}
-	if user.LastName != "" {
-		updateFields["last_name"] = user.LastName
+	if lastName := strings.TrimSpace(user.LastName); lastName != "" {
+		setFields["last_name"] = lastName
 	}
-	if user.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.MaxCost)
+	if passwordChanged {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), s.cfg.BcryptCost)
 		if err != nil {
-			return nil, fmt.Errorf("password hashing failed: %w", err)
+			return nil, fmt.Errorf("%w: %v", ErrPasswordHashFailed, err)
 		}
-		updateFields["hash"] = hashedPassword
+		setFields["hash"] = string(hashedPassword)
+		incFields["token_version"] = 1
 	}
 	if user.Birthdate != "" {
 		birthdate, err := time.Parse(time.RFC3339, user.Birthdate)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse birthdate: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrInvalidBirthdate, err)
 		}
-		updateFields["birthdate"] = birthdate
+		setFields["birthdate"] = birthdate.UTC()
 	}
 	if user.ProfilePicture != "" {
-		updateFields["profile_picture"] = user.ProfilePicture
+		if err := s.checkProfilePicture(user.ProfilePicture); err != nil {
+			return nil, err
+		}
+		setFields["profile_picture"] = user.ProfilePicture
 	}
 
-	if len(updateFields) == 0 {
-		return nil, fmt.Errorf("no fields to update")
+	if len(setFields) == 0 && len(incFields) == 0 {
+		return nil, ErrNoFieldsToUpdate
 	}
 
-	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	update := bson.M{}
+	if len(setFields) > 0 {
+		update["$set"] = setFields
+	}
+	if len(incFields) > 0 {
+		update["$inc"] = incFields
+	}
+
 	var updatedUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOneAndUpdate(
+	err = s.users().FindOneAndUpdate(
 		ctx,
 		bson.M{"_id": userID},
-		bson.M{"$set": updateFields},
-		opts,
+		update,
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&updatedUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrUserNotFound
 		}
-		return nil, fmt.Errorf("failed to update user: %w", err)
+		if isDuplicateKey(err) {
+			if emailChanged && strings.Contains(strings.ToLower(err.Error()), "email") {
+				return nil, ErrEmailTaken
+			}
+			if _, ok := setFields["username"]; ok {
+				return nil, ErrUsernameTaken
+			}
+			return nil, ErrUserExists
+		}
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+
+	if emailChanged {
+		confirmErr := s.email.SendConfirmationEmail(newEmail, confirmationToken)
+		if confirmErr != nil {
+			log.Printf("failed to send confirmation email to new address %s: %v", newEmail, confirmErr)
+		}
+		if noticeErr := s.email.SendEmailChangedNotice(current.Email, newEmail); noticeErr != nil {
+			log.Printf("failed to send email-change notice to old address %s: %v", current.Email, noticeErr)
+		}
+		if confirmErr != nil {
+			return &updatedUser, fmt.Errorf("%w: %v", ErrEmailSendFailed, confirmErr)
+		}
+	}
+
+	if passwordChanged {
+		log.Printf("audit: password changed user_id=%s", userID.Hex())
+	}
+	if emailChanged {
+		log.Printf("audit: email changed user_id=%s old=%s new=%s", userID.Hex(), current.Email, newEmail)
 	}
 
 	return &updatedUser, nil
@@ -227,149 +460,213 @@ func (s *service) DeleteUser(userID primitive.ObjectID) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := s.db.Database("gordian").Collection("users").DeleteOne(ctx, bson.M{"_id": userID})
+	result, err := s.users().DeleteOne(ctx, bson.M{"_id": userID})
 	if err != nil {
-		return fmt.Errorf("failed to delete user: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
+	if result.DeletedCount == 0 {
+		return ErrUserNotFound
+	}
+	log.Printf("audit: account deleted user_id=%s", userID.Hex())
 
 	return nil
 }
 
 func (s *service) CreateSession(userID primitive.ObjectID) (*data.SessionTokens, error) {
-	now := time.Now()
-
-	accessClaims := &jwt.RegisteredClaims{
-		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
-		IssuedAt:  jwt.NewNumericDate(now),
-		ID:        "access",
+	tokenVersion, err := s.GetTokenVersion(userID)
+	if err != nil {
+		return nil, err
 	}
 
-	refreshClaims := &jwt.RegisteredClaims{
-		Subject:   userID.Hex(),
-		ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
-		IssuedAt:  jwt.NewNumericDate(now),
-		ID:        "refresh",
+	return newSessionTokens(userID, tokenVersion, s.jwtSecret, time.Now().UTC(), s.cfg.AccessTokenTTL, s.cfg.RefreshTokenTTL)
+}
+
+func newSessionTokens(userID primitive.ObjectID, tokenVersion int, secret []byte, now time.Time, accessTTL, refreshTTL time.Duration) (*data.SessionTokens, error) {
+	accessExpiresAt := now.Add(accessTTL)
+	refreshExpiresAt := now.Add(refreshTTL)
+
+	accessClaims := &data.Claims{
+		TokenType:    data.TokenTypeAccess,
+		TokenVersion: tokenVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID.Hex(),
+			Issuer:    data.TokenIssuer,
+			Audience:  jwt.ClaimStrings{data.TokenAudience},
+			ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        uuid.NewString(),
+		},
 	}
 
-	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(jwtSecret)
+	refreshClaims := &data.Claims{
+		TokenType:    data.TokenTypeRefresh,
+		TokenVersion: tokenVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID.Hex(),
+			Issuer:    data.TokenIssuer,
+			Audience:  jwt.ClaimStrings{data.TokenAudience},
+			ExpiresAt: jwt.NewNumericDate(refreshExpiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        uuid.NewString(),
+		},
+	}
+
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(secret)
 	if err != nil {
 		return nil, fmt.Errorf("access token creation failed: %w", err)
 	}
 
-	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString(jwtSecret)
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString(secret)
 	if err != nil {
 		return nil, fmt.Errorf("refresh token creation failed: %w", err)
 	}
 
 	return &data.SessionTokens{
 		AccessToken:      accessToken,
-		AccessExpiresAt:  accessClaims.ExpiresAt.Time,
+		AccessCreatedAt:  now,
+		AccessExpiresAt:  accessExpiresAt,
 		RefreshToken:     refreshToken,
-		RefreshExpiresAt: refreshClaims.ExpiresAt.Time,
+		RefreshCreatedAt: now,
+		RefreshExpiresAt: refreshExpiresAt,
 	}, nil
 }
 
-func (s *service) ConfirmEmail(token string) (bool, string) {
+func (s *service) ConfirmEmail(token string) error {
+	if token == "" {
+		return ErrTokenInvalid
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"email_token": token}).Decode(&foundUser)
+	err := s.users().FindOne(ctx, bson.M{
+		"email_token":        hashToken(token),
+		"email_token_expiry": bson.M{"$gt": time.Now().UTC()},
+	}).Decode(&foundUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return false, "Invalid or expired confirmation link"
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return ErrTokenInvalid
 		}
-		return false, "An error occurred while confirming your email"
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
 	if foundUser.EmailConfirmed {
-		return false, "Email is already confirmed"
+		return ErrEmailAlreadyConfirmed
 	}
 
-	update := bson.M{
-		"$set": bson.M{
-			"email_confirmed": true,
-		},
-	}
-	err = s.db.Database("gordian").Collection("users").FindOneAndUpdate(
+	_, err = s.users().UpdateOne(
 		ctx,
 		bson.M{"_id": foundUser.ID},
-		update,
-	).Err()
-
+		bson.M{
+			"$set":   bson.M{"email_confirmed": true},
+			"$unset": bson.M{"email_token": "", "email_token_expiry": ""},
+		},
+	)
 	if err != nil {
-		return false, "Failed to confirm email. Please try again."
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
+	log.Printf("audit: email confirmed user_id=%s", foundUser.ID.Hex())
 
-	return true, "Email confirmed successfully"
+	return nil
 }
 
 func (s *service) ResendConfirmationEmail(userID primitive.ObjectID) error {
+	user, err := s.GetUser(userID)
+	if err != nil {
+		return err
+	}
+
+	if user.EmailConfirmed {
+		return ErrEmailAlreadyConfirmed
+	}
+	if user.EmailConfirmationAttempts >= 3 {
+		return ErrConfirmationLimit
+	}
+	if time.Since(user.LastEmailAttemptTime) < 5*time.Minute {
+		return ErrConfirmationCooldown
+	}
+
+	return s.issueConfirmationEmail(user)
+}
+
+func (s *service) ResendConfirmationEmailByEmail(email string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var user data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"_id": userID}).Decode(&user)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return fmt.Errorf("user not found")
-		}
-		return fmt.Errorf("database error: %v", err)
-	}
-
-	if user.EmailConfirmed {
-		return fmt.Errorf("email already confirmed")
-	}
-
-	if user.EmailConfirmationAttempts >= 3 {
-		return fmt.Errorf("maximum email confirmation attempts reached")
-	}
-
-	if time.Since(user.LastEmailAttemptTime) < 5*time.Minute {
-		return fmt.Errorf("please wait 5 minutes before requesting another confirmation email")
-	}
-
-	newEmailToken := uuid.New().String()
-
-	update := bson.M{
-		"$set": bson.M{
-			"email_token":                 newEmailToken,
-			"email_confirmation_attempts": user.EmailConfirmationAttempts + 1,
-			"last_email_attempt_time":     time.Now(),
-		},
-	}
-
-	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+	err := s.users().FindOne(
 		ctx,
-		bson.M{"_id": userID},
-		update,
+		bson.M{"email": normalizeEmail(email)},
+		options.FindOne().SetCollation(&caseInsensitive),
+	).Decode(&user)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil
+		}
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+
+	if user.EmailConfirmed || user.EmailConfirmationAttempts >= 3 || time.Since(user.LastEmailAttemptTime) < 5*time.Minute {
+		return nil
+	}
+
+	return s.issueConfirmationEmail(&user)
+}
+
+func (s *service) issueConfirmationEmail(user *data.User) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rawToken := uuid.NewString()
+	now := time.Now().UTC()
+	result, err := s.users().UpdateOne(
+		ctx,
+		bson.M{
+			"_id":                         user.ID,
+			"email_confirmed":             false,
+			"email_confirmation_attempts": bson.M{"$lt": 3},
+			"last_email_attempt_time":     bson.M{"$lt": now.Add(-5 * time.Minute)},
+		},
+		bson.M{
+			"$set": bson.M{
+				"email_token":             hashToken(rawToken),
+				"email_token_expiry":      now.Add(s.cfg.EmailConfirmationTokenTTL),
+				"last_email_attempt_time": now,
+			},
+			"$inc": bson.M{"email_confirmation_attempts": 1},
+		},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update user: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrConfirmationCooldown
 	}
 
-	if err := s.emailService.SendConfirmationEmail(user.Email, newEmailToken); err != nil {
-		return fmt.Errorf("failed to send confirmation email: %v", err)
+	if err := s.email.SendConfirmationEmail(user.Email, rawToken); err != nil {
+		return fmt.Errorf("%w: %v", ErrEmailSendFailed, err)
 	}
 
 	return nil
 }
 
 func (s *service) DeleteUnconfirmedUsers() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	deleteFilter := bson.M{
+	filter := bson.M{
 		"email_confirmed": false,
 		"date_joined": bson.M{
-			"$lt": time.Now().AddDate(0, 0, -3),
+			"$lt": time.Now().UTC().AddDate(0, 0, -3),
 		},
 	}
 
-	result, err := s.db.Database("gordian").Collection("users").DeleteMany(ctx, deleteFilter)
+	result, err := s.users().DeleteMany(ctx, filter)
 	if err != nil {
-		return fmt.Errorf("failed to delete unconfirmed users: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
 	log.Printf("Deleted %d unconfirmed users older than 3 days", result.DeletedCount)
@@ -381,92 +678,168 @@ func (s *service) InitiatePasswordReset(email string) error {
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(ctx, bson.M{"email": email}).Decode(&foundUser)
+	err := s.users().FindOne(
+		ctx,
+		bson.M{"email": normalizeEmail(email)},
+		options.FindOne().SetCollation(&caseInsensitive),
+	).Decode(&foundUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return fmt.Errorf("no user found with email: %s", email)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Do not reveal whether the address is registered.
+			return nil
 		}
-		return fmt.Errorf("database error: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
-	resetToken := uuid.New().String()
-	resetTokenExpiry := time.Now().Add(1 * time.Hour)
-
-	update := bson.M{
-		"$set": bson.M{
-			"password_reset_token":  resetToken,
-			"password_reset_expiry": resetTokenExpiry,
-		},
-	}
-
-	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+	rawToken := uuid.NewString()
+	_, err = s.users().UpdateOne(
 		ctx,
 		bson.M{"_id": foundUser.ID},
-		update,
+		bson.M{
+			"$set": bson.M{
+				"password_reset_token":  hashToken(rawToken),
+				"password_reset_expiry": time.Now().UTC().Add(s.cfg.PasswordResetTokenTTL),
+			},
+		},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update password reset token: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
-	if err := s.emailService.SendPasswordResetEmail(email, resetToken); err != nil {
-		return fmt.Errorf("failed to send password reset email: %v", err)
+	if err := s.email.SendPasswordResetEmail(foundUser.Email, rawToken); err != nil {
+		return fmt.Errorf("%w: %v", ErrEmailSendFailed, err)
 	}
 
 	return nil
 }
 
 func (s *service) ResetPassword(token, newPassword string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	var foundUser data.User
-	err := s.db.Database("gordian").Collection("users").FindOne(
-		ctx,
-		bson.M{
-			"password_reset_token":  token,
-			"password_reset_expiry": bson.M{"$gt": time.Now()},
-		},
-	).Decode(&foundUser)
+	err := s.users().FindOne(ctx, bson.M{
+		"password_reset_token":  hashToken(token),
+		"password_reset_expiry": bson.M{"$gt": time.Now().UTC()},
+	}).Decode(&foundUser)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return fmt.Errorf("invalid or expired reset token")
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return ErrTokenInvalid
 		}
-		return fmt.Errorf("database error: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.cfg.BcryptCost)
 	if err != nil {
-		return fmt.Errorf("failed to hash password: %v", err)
+		return fmt.Errorf("%w: %v", ErrPasswordHashFailed, err)
 	}
 
-	update := bson.M{
-		"$set": bson.M{
-			"hash":                  string(hashedPassword),
-			"password_reset_token":  "",
-			"password_reset_expiry": time.Time{},
-		},
-	}
-
-	_, err = s.db.Database("gordian").Collection("users").UpdateOne(
+	_, err = s.users().UpdateOne(
 		ctx,
 		bson.M{"_id": foundUser.ID},
-		update,
+		bson.M{
+			"$set":   bson.M{"hash": string(hashedPassword)},
+			"$unset": bson.M{"password_reset_token": "", "password_reset_expiry": ""},
+			"$inc":   bson.M{"token_version": 1},
+		},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update password: %v", err)
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
+	log.Printf("audit: password reset user_id=%s", foundUser.ID.Hex())
+
+	return nil
+}
+
+func (s *service) RevokeSessions(userID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := s.users().UpdateOne(
+		ctx,
+		bson.M{"_id": userID},
+		bson.M{"$inc": bson.M{"token_version": 1}},
+	)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrUserNotFound
+	}
+	log.Printf("audit: sessions revoked user_id=%s", userID.Hex())
 
 	return nil
 }
 
 func (s *service) Health() (map[string]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := s.db.Ping(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("db down: %v", err)
+	if err := s.client.Ping(ctx, nil); err != nil {
+		return nil, fmt.Errorf("db down: %w", err)
 	}
 
 	return map[string]string{"message": "It's healthy"}, nil
+}
+
+func (s *service) Close(ctx context.Context) error {
+	if s.client == nil {
+		return nil
+	}
+	return s.client.Disconnect(ctx)
+}
+
+func (s *service) checkProfilePicture(value string) error {
+	if value == "" {
+		return nil
+	}
+	size, err := data.ProfilePictureSize(value)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrProfilePictureInvalid, err)
+	}
+	if size > s.cfg.MaxProfilePictureBytes {
+		return ErrProfilePictureTooLarge
+	}
+	return nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func uriHasCredentials(uri string) bool {
+	parsed, err := url.Parse(uri)
+	return err == nil && parsed.User != nil
+}
+
+func isDuplicateKey(err error) bool {
+	var writeErr mongo.WriteException
+	if errors.As(err, &writeErr) {
+		for _, e := range writeErr.WriteErrors {
+			if e.Code == 11000 {
+				return true
+			}
+		}
+	}
+
+	var commandErr mongo.CommandError
+	if errors.As(err, &commandErr) {
+		return commandErr.Code == 11000
+	}
+
+	var bulkErr mongo.BulkWriteException
+	if errors.As(err, &bulkErr) {
+		for _, e := range bulkErr.WriteErrors {
+			if e.Code == 11000 {
+				return true
+			}
+		}
+	}
+
+	return false
 }

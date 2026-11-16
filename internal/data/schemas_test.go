@@ -8,128 +8,120 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestValidateRegisterRequest_Errors(t *testing.T) {
-	// missing required fields
-	req := &RegisterRequest{}
-	errs := ValidateRegisterRequest(req)
-	if errs == nil {
-		t.Fatalf("expected errors for empty register request, got nil")
-	}
-	if _, ok := errs["Username"]; !ok {
-		t.Fatalf("expected Username error, got: %v", errs)
-	}
-
-	// invalid email
-	req2 := &RegisterRequest{
+func validRegisterRequest() *RegisterRequest {
+	return &RegisterRequest{
 		Username:    "validuser",
-		Email:       "not-an-email",
+		Email:       "user@example.com",
 		Password:    "Aa1!aaaa",
-		FirstName:   "FN",
-		LastName:    "LN",
+		FirstName:   "First",
+		LastName:    "Last",
 		Birthdate:   time.Now().AddDate(-25, 0, 0).Format(time.RFC3339),
 		AcceptTerms: true,
 	}
-	errs2 := ValidateRegisterRequest(req2)
-	if errs2 == nil {
-		t.Fatalf("expected email validation error, got nil")
+}
+
+func TestRegisterRequestValidation(t *testing.T) {
+	errs := ValidationErrors(Validate.Struct(&RegisterRequest{}))
+	if errs == nil {
+		t.Fatal("expected errors for empty register request")
 	}
-	if v, ok := errs2["Email"]; !ok || v != "invalid email format" {
-		t.Fatalf("expected invalid email format error, got: %v", errs2)
+	for _, field := range []string{"username", "email", "password", "first_name", "last_name", "birthdate", "accept_terms"} {
+		if _, ok := errs[field]; !ok {
+			t.Errorf("expected %s error, got: %v", field, errs)
+		}
+	}
+
+	req := validRegisterRequest()
+	if errs := ValidationErrors(Validate.Struct(req)); errs != nil {
+		t.Fatalf("expected valid register request, got: %v", errs)
+	}
+
+	req.Email = "not-an-email"
+	errs = ValidationErrors(Validate.Struct(req))
+	if got := errs["email"]; got != "invalid email format" {
+		t.Fatalf("expected invalid email format error, got: %v", errs)
 	}
 }
 
-func TestValidatePasswordResetConfirmRequest_Token(t *testing.T) {
-	req := &PasswordResetConfirmRequest{
-		Token:       "not-a-uuid",
-		NewPassword: "Aa1!aaaa",
+func TestRegisterRequestUsernameCharset(t *testing.T) {
+	req := validRegisterRequest()
+	req.Username = "user@example"
+	errs := ValidationErrors(Validate.Struct(req))
+	if _, ok := errs["username"]; !ok {
+		t.Fatalf("expected username charset error, got: %v", errs)
 	}
-	errs := ValidatePasswordResetConfirmRequest(req)
-	if errs == nil {
-		t.Fatalf("expected token format error, got nil")
+}
+
+func TestRegisterRequestProfilePicture(t *testing.T) {
+	req := validRegisterRequest()
+	req.ProfilePicture = base64.StdEncoding.EncodeToString([]byte("smallpic"))
+	if errs := ValidationErrors(Validate.Struct(req)); errs != nil {
+		t.Fatalf("expected valid profile picture, got: %v", errs)
 	}
-	if v, ok := errs["Token"]; !ok || v != "invalid token format" {
+
+	req.ProfilePicture = "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="
+	errs := ValidationErrors(Validate.Struct(req))
+	if _, ok := errs["profile_picture"]; !ok {
+		t.Fatalf("expected unsupported image type error, got: %v", errs)
+	}
+}
+
+func TestLoginRequestOnlyRequiresCredentials(t *testing.T) {
+	// Login must not apply password complexity: legacy passwords must still work.
+	req := &LoginRequest{Identifier: "validuser", Password: "-"}
+	if errs := ValidationErrors(Validate.Struct(req)); errs != nil {
+		t.Fatalf("expected legacy password to pass login validation, got: %v", errs)
+	}
+
+	errs := ValidationErrors(Validate.Struct(&LoginRequest{Password: "-"}))
+	if _, ok := errs["identifier"]; !ok {
+		t.Fatalf("expected identifier required error, got: %v", errs)
+	}
+}
+
+func TestUpdateRequestValidation(t *testing.T) {
+	if errs := ValidationErrors(Validate.Struct(&UpdateRequest{})); errs != nil {
+		t.Fatalf("expected empty update to pass validation, got: %v", errs)
+	}
+
+	errs := ValidationErrors(Validate.Struct(&UpdateRequest{Email: "not-an-email"}))
+	if got := errs["email"]; got != "invalid email format" {
+		t.Fatalf("expected invalid email format error, got: %v", errs)
+	}
+}
+
+func TestPasswordResetValidation(t *testing.T) {
+	errs := ValidationErrors(Validate.Struct(&PasswordResetInitiateRequest{}))
+	if _, ok := errs["email"]; !ok {
+		t.Fatalf("expected email required error, got: %v", errs)
+	}
+
+	bad := &PasswordResetConfirmRequest{Token: "not-a-uuid", NewPassword: "Aa1!aaaa"}
+	errs = ValidationErrors(Validate.Struct(bad))
+	if got := errs["token"]; got != "invalid token format" {
 		t.Fatalf("expected invalid token format error, got: %v", errs)
 	}
-}
 
-func TestValidateRegisterRequest_Success(t *testing.T) {
-	// small valid profile picture
-	pic := base64.StdEncoding.EncodeToString([]byte("smallpic"))
-	req := &RegisterRequest{
-		Username:       "validuser",
-		Email:          "user@example.com",
-		Password:       "Aa1!aaaa",
-		FirstName:      "FN",
-		LastName:       "LN",
-		Birthdate:      time.Now().AddDate(-25, 0, 0).Format(time.RFC3339),
-		AcceptTerms:    true,
-		ProfilePicture: pic,
-	}
-	errs := ValidateRegisterRequest(req)
-	if errs != nil {
-		t.Fatalf("expected no errors for valid register request, got: %v", errs)
+	good := &PasswordResetConfirmRequest{Token: uuid.NewString(), NewPassword: "Aa1!aaaa"}
+	if errs := ValidationErrors(Validate.Struct(good)); errs != nil {
+		t.Fatalf("expected valid reset request, got: %v", errs)
 	}
 }
 
-func TestValidateLoginRequest(t *testing.T) {
-	// missing identifier
-	bad := &LoginRequest{Password: "Aa1!aaaa"}
-	errs := ValidateLoginRequest(bad)
-	if errs == nil {
-		t.Fatalf("expected errors for missing identifier, got nil")
+func TestResendConfirmationValidation(t *testing.T) {
+	errs := ValidationErrors(Validate.Struct(&ResendConfirmationRequest{}))
+	if _, ok := errs["email"]; !ok {
+		t.Fatalf("expected email required error, got: %v", errs)
 	}
 
-	// valid
-	good := &LoginRequest{Identifier: "validuser", Password: "Aa1!aaaa"}
-	errs2 := ValidateLoginRequest(good)
-	if errs2 != nil {
-		t.Fatalf("expected no errors for valid login request, got: %v", errs2)
+	if errs := ValidationErrors(Validate.Struct(&ResendConfirmationRequest{Email: "user@example.com"})); errs != nil {
+		t.Fatalf("expected valid resend request, got: %v", errs)
 	}
 }
 
-func TestValidateUpdateRequest(t *testing.T) {
-	// empty update should pass (all fields optional)
-	empty := &UpdateRequest{}
-	errs := ValidateUpdateRequest(empty)
-	if errs != nil {
-		t.Fatalf("expected no errors for empty update, got: %v", errs)
-	}
-
-	// invalid email
-	bad := &UpdateRequest{Email: "not-an-email"}
-	errs2 := ValidateUpdateRequest(bad)
-	if errs2 == nil {
-		t.Fatalf("expected email validation error for update, got nil")
-	}
-	if v, ok := errs2["Email"]; !ok || v != "invalid email format" {
-		t.Fatalf("expected invalid email format error, got: %v", errs2)
-	}
-}
-
-func TestValidatePasswordResetInitiateRequest(t *testing.T) {
-	// missing email
-	bad := &PasswordResetInitiateRequest{}
-	errs := ValidatePasswordResetInitiateRequest(bad)
-	if errs == nil {
-		t.Fatalf("expected errors for missing email, got nil")
-	}
-
-	// valid
-	good := &PasswordResetInitiateRequest{Email: "user@example.com"}
-	errs2 := ValidatePasswordResetInitiateRequest(good)
-	if errs2 != nil {
-		t.Fatalf("expected no errors for valid password reset initiate, got: %v", errs2)
-	}
-}
-
-func TestValidatePasswordResetConfirmRequest_Success(t *testing.T) {
-	token := uuid.New().String()
-	req := &PasswordResetConfirmRequest{
-		Token:       token,
-		NewPassword: "Aa1!aaaa",
-	}
-	errs := ValidatePasswordResetConfirmRequest(req)
-	if errs != nil {
-		t.Fatalf("expected no errors for valid password reset confirm, got: %v", errs)
+func TestFetchUserByIDValidation(t *testing.T) {
+	errs := ValidationErrors(Validate.Struct(&FetchUserByIDRequest{}))
+	if _, ok := errs["user_id"]; !ok {
+		t.Fatalf("expected user_id required error, got: %v", errs)
 	}
 }

@@ -17,10 +17,7 @@ const docTemplate = `{
     "paths": {
         "/confirm-email/{token}": {
             "get": {
-                "description": "Confirm a user's email using a token sent by email. Renders a confirmation page.",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Confirms an email address using the token sent by email and renders a confirmation page.",
                 "produces": [
                     "text/html"
                 ],
@@ -49,6 +46,12 @@ const docTemplate = `{
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    "500": {
+                        "description": "HTML page with failure message",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 }
             }
@@ -60,7 +63,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently delete the authenticated user's account",
+                "description": "Permanently deletes the authenticated user's account.",
                 "produces": [
                     "application/json"
                 ],
@@ -70,30 +73,27 @@ const docTemplate = `{
                 "summary": "Delete user account",
                 "responses": {
                     "200": {
-                        "description": "message: Account deleted successfully",
+                        "description": "Account deleted successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Account not found or already deleted",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: An error occurred while deleting your account or Unexpected error during account deletion",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -106,7 +106,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieve the authenticated user's profile",
+                "description": "Retrieves the authenticated user's profile.",
                 "produces": [
                     "application/json"
                 ],
@@ -116,37 +116,27 @@ const docTemplate = `{
                 "summary": "Fetch current user",
                 "responses": {
                     "200": {
-                        "description": "message: User profile retrieved successfully, user: user object",
+                        "description": "User profile retrieved successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.UserResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "404": {
-                        "description": "message: Your user profile could not be retrieved",
+                        "description": "User profile not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: An error occurred while fetching your profile",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -159,7 +149,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieve a user's public profile by user ID",
+                "description": "Retrieves a limited public profile by user ID. Birthdate, email and confirmation state are never returned.",
                 "consumes": [
                     "application/json"
                 ],
@@ -172,55 +162,50 @@ const docTemplate = `{
                 "summary": "Fetch user by ID",
                 "parameters": [
                     {
-                        "description": "{\\",
+                        "description": "User ID",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/data.FetchUserByIDRequest"
                         }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: User fetched successfully, user: {username, first_name, last_name, birthdate, date_joined}",
+                        "description": "User fetched successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.PublicProfileResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request or validation errors or Invalid user ID format",
+                        "description": "Validation error or invalid user ID format",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "404": {
-                        "description": "message: The specified user could not be found",
+                        "description": "The specified user could not be found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: An error occurred while retrieving user information or An unexpected error occurred",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -228,7 +213,7 @@ const docTemplate = `{
         },
         "/health": {
             "get": {
-                "description": "Returns service health status and details",
+                "description": "Returns service health status and details.",
                 "produces": [
                     "application/json"
                 ],
@@ -238,17 +223,15 @@ const docTemplate = `{
                 "summary": "Service health check",
                 "responses": {
                     "200": {
-                        "description": "status: ok, details: health details",
+                        "description": "Service is healthy",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.HealthResponse"
                         }
                     },
                     "503": {
-                        "description": "status: error, message: Service health check failed",
+                        "description": "Service health check failed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -256,7 +239,7 @@ const docTemplate = `{
         },
         "/login": {
             "post": {
-                "description": "Authenticate with username/email and password",
+                "description": "Authenticates with username/email and password. Invalid identifiers and passwords return the same response.",
                 "consumes": [
                     "application/json"
                 ],
@@ -280,55 +263,76 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Login successful, user: user object, tokens: token pair",
+                        "description": "Login successful",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.LoginRegisterResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request format or validation error",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Username or email not found or Incorrect password",
+                        "description": "Invalid credentials",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "403": {
-                        "description": "message: Email not confirmed. Please confirm your email before logging in.",
+                        "description": "Email not confirmed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "429": {
-                        "description": "message: Too many failed login attempts. Please try again later.",
+                        "description": "Too many failed login attempts",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: An error occurred during login or Unable to create session",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Revokes all access and refresh tokens for the authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Log out",
+                "responses": {
+                    "200": {
+                        "description": "Logged out successfully",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -336,7 +340,7 @@ const docTemplate = `{
         },
         "/password-reset/confirm": {
             "post": {
-                "description": "Confirm a password reset using a token and provide a new password",
+                "description": "Sets a new password using a single-use reset token. All existing sessions are revoked.",
                 "consumes": [
                     "application/json"
                 ],
@@ -360,21 +364,27 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Password reset successfully",
+                        "description": "Password reset successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request format, validation error, or invalid/expired reset token",
+                        "description": "Validation error or invalid/expired reset token",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -382,7 +392,7 @@ const docTemplate = `{
         },
         "/password-reset/initiate": {
             "post": {
-                "description": "Send a password reset link to the provided email address",
+                "description": "Sends a password reset token if the account exists. The response is identical for unknown addresses so accounts cannot be enumerated.",
                 "consumes": [
                     "application/json"
                 ],
@@ -406,39 +416,27 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: If an account exists with this email, a reset link will be sent",
+                        "description": "If an account exists with this email, a reset link will be sent",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request format or validation error",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
-                    "404": {
-                        "description": "message: No user found with this email",
+                    "429": {
+                        "description": "Too many password reset requests",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Failed to send password reset email; check if the email is valid",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -451,7 +449,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Exchange a valid refresh token for a new access/refresh token pair",
+                "description": "Exchanges a valid refresh token for a new token pair. Deleted users, revoked sessions and unconfirmed email addresses are rejected.",
                 "produces": [
                     "application/json"
                 ],
@@ -461,28 +459,27 @@ const docTemplate = `{
                 "summary": "Refresh authentication tokens",
                 "responses": {
                     "200": {
-                        "description": "message: Tokens refreshed successfully, tokens: token pair",
+                        "description": "Tokens refreshed successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.TokenResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Email not confirmed",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Unable to refresh authentication tokens",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -490,7 +487,7 @@ const docTemplate = `{
         },
         "/register": {
             "post": {
-                "description": "Create a new user account and send confirmation email",
+                "description": "Creates a new account and sends an email confirmation link. If email delivery fails the account is still created; use the resend endpoint.",
                 "consumes": [
                     "application/json"
                 ],
@@ -513,49 +510,34 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "message: Registration successful",
+                    "201": {
+                        "description": "Registration successful",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "206": {
-                        "description": "message: Registration successful, but confirmation email could not be sent",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid registration request format, validation error, or invalid birthdate format",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
                     "409": {
-                        "description": "message: Username or email is already registered",
+                        "description": "Username or email is already registered",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many registration attempts",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Unable to process password or Registration failed",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -568,67 +550,99 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Resend the email confirmation to the authenticated user",
+                "description": "Resends the email confirmation to the authenticated user. Prefer the unauthenticated POST variant when login is blocked.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Users"
                 ],
-                "summary": "Resend confirmation email",
+                "summary": "Resend confirmation email (authenticated)",
                 "responses": {
                     "200": {
-                        "description": "message: Confirmation email sent successfully",
+                        "description": "Confirmation email sent successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "404": {
-                        "description": "message: User profile not found",
+                        "description": "User profile not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "409": {
-                        "description": "message: Email is already confirmed",
+                        "description": "Email is already confirmed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "429": {
-                        "description": "message: Too many confirmation email requests or Please wait 5 minutes before requesting another confirmation email",
+                        "description": "Too many confirmation email requests",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Unable to resend confirmation email",
+                        "description": "Unable to resend confirmation email",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Sends a new confirmation email when an unconfirmed account exists. Always returns the same response.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Resend confirmation email by address",
+                "parameters": [
+                    {
+                        "description": "Email address",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/data.ResendConfirmationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "If an account exists and is unconfirmed, an email will be sent",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -641,7 +655,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update fields of the authenticated user's profile",
+                "description": "Updates the authenticated user's profile. Changing the email or password requires current_password; a password change also revokes all existing sessions and returns a new token pair.",
                 "consumes": [
                     "application/json"
                 ],
@@ -665,55 +679,39 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Profile updated successfully, user: updated user object",
+                        "description": "Profile updated successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.UserResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request format, validation error, No update fields provided, or Invalid birthdate format",
+                        "description": "Validation error, no update fields, or missing current password",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized or current password incorrect",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "404": {
-                        "description": "message: Your user profile could not be found",
+                        "description": "User profile not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "409": {
-                        "description": "message: Username is already taken or Email is already registered",
+                        "description": "Username or email is already registered",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Unable to process password update, An error occurred while updating your profile, An error occurred while updating your profile picture, or Unable to check uniqueness of username or email",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -724,7 +722,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update fields of the authenticated user's profile",
+                "description": "Updates the authenticated user's profile. Changing the email or password requires current_password; a password change also revokes all existing sessions and returns a new token pair.",
                 "consumes": [
                     "application/json"
                 ],
@@ -748,55 +746,39 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "message: Profile updated successfully, user: updated user object",
+                        "description": "Profile updated successfully",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/data.UserResponse"
                         }
                     },
                     "400": {
-                        "description": "message: Invalid request format, validation error, No update fields provided, or Invalid birthdate format",
+                        "description": "Validation error, no update fields, or missing current password",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.ValidationErrorResponse"
                         }
                     },
                     "401": {
-                        "description": "message: Unauthorized (handled by middleware)",
+                        "description": "Unauthorized or current password incorrect",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "404": {
-                        "description": "message: Your user profile could not be found",
+                        "description": "User profile not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "409": {
-                        "description": "message: Username is already taken or Email is already registered",
+                        "description": "Username or email is already registered",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     },
                     "500": {
-                        "description": "message: Unable to process password update, An error occurred while updating your profile, An error occurred while updating your profile picture, or Unable to check uniqueness of username or email",
+                        "description": "Internal server error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/data.MessageResponse"
                         }
                     }
                 }
@@ -804,6 +786,44 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "data.FetchUserByIDRequest": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
+                    "type": "string",
+                    "example": "615f2e0a6c6d5c0e1a1e4a01"
+                }
+            }
+        },
+        "data.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "data.LoginRegisterResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "tokens": {
+                    "$ref": "#/definitions/data.SessionTokens"
+                },
+                "user": {
+                    "$ref": "#/definitions/data.User"
+                }
+            }
+        },
         "data.LoginRequest": {
             "type": "object",
             "required": [
@@ -813,12 +833,21 @@ const docTemplate = `{
             "properties": {
                 "identifier": {
                     "type": "string",
-                    "minLength": 5,
+                    "maxLength": 254,
                     "example": "johndoe"
                 },
                 "password": {
                     "type": "string",
+                    "maxLength": 128,
                     "example": "P@ssw0rd!"
+                }
+            }
+        },
+        "data.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -847,7 +876,65 @@ const docTemplate = `{
             "properties": {
                 "email": {
                     "type": "string",
+                    "maxLength": 254,
                     "example": "john@example.com"
+                }
+            }
+        },
+        "data.PublicProfile": {
+            "type": "object",
+            "properties": {
+                "date_joined": {
+                    "type": "string"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "profile_picture": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "data.PublicProfileResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/data.PublicProfile"
+                }
+            }
+        },
+        "data.PublicUser": {
+            "type": "object",
+            "properties": {
+                "birthdate": {
+                    "type": "string"
+                },
+                "date_joined": {
+                    "type": "string"
+                },
+                "email_confirmed": {
+                    "type": "boolean"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "profile_picture": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },
@@ -873,6 +960,7 @@ const docTemplate = `{
                 },
                 "email": {
                     "type": "string",
+                    "maxLength": 254,
                     "example": "john@example.com"
                 },
                 "first_name": {
@@ -903,6 +991,53 @@ const docTemplate = `{
                 }
             }
         },
+        "data.ResendConfirmationRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "example": "john@example.com"
+                }
+            }
+        },
+        "data.SessionTokens": {
+            "type": "object",
+            "properties": {
+                "access_created_at": {
+                    "type": "string"
+                },
+                "access_expires_at": {
+                    "type": "string"
+                },
+                "access_token": {
+                    "type": "string"
+                },
+                "refresh_created_at": {
+                    "type": "string"
+                },
+                "refresh_expires_at": {
+                    "type": "string"
+                },
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "data.TokenResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "tokens": {
+                    "$ref": "#/definitions/data.SessionTokens"
+                }
+            }
+        },
         "data.UpdateRequest": {
             "type": "object",
             "properties": {
@@ -910,8 +1045,14 @@ const docTemplate = `{
                     "type": "string",
                     "example": "1990-01-01T00:00:00Z"
                 },
+                "current_password": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "example": "OldP@ssw0rd!"
+                },
                 "email": {
                     "type": "string",
+                    "maxLength": 254,
                     "example": "john@example.com"
                 },
                 "first_name": {
@@ -939,6 +1080,69 @@ const docTemplate = `{
                     "maxLength": 20,
                     "minLength": 5,
                     "example": "johndoe"
+                }
+            }
+        },
+        "data.User": {
+            "type": "object",
+            "properties": {
+                "accept_terms": {
+                    "type": "boolean"
+                },
+                "birthdate": {
+                    "type": "string"
+                },
+                "date_joined": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_confirmed": {
+                    "type": "boolean"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "profile_picture": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "data.UserResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "tokens": {
+                    "$ref": "#/definitions/data.SessionTokens"
+                },
+                "user": {
+                    "$ref": "#/definitions/data.PublicUser"
+                }
+            }
+        },
+        "data.ValidationErrorResponse": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         }

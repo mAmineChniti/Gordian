@@ -1,17 +1,14 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/golang-jwt/jwt/v5"
-	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
@@ -20,42 +17,71 @@ import (
 
 	_ "github.com/mAmineChniti/Gordian/docs"
 	"github.com/mAmineChniti/Gordian/internal/data"
+	"github.com/mAmineChniti/Gordian/internal/database"
 )
 
-var (
-	jwtSecret = []byte(os.Getenv("JWTSECRET"))
-	debug     = os.Getenv("DEBUG") == "true"
-)
+const contextUserIDKey = "user_id"
 
+// RegisterRoutes builds the HTTP router and its middleware chain.
 func (s *Server) RegisterRoutes() http.Handler {
 	e := echo.New()
-	e.Use(middleware.Recover())
+	e.HideBanner = true
+	e.HidePort = true
 
+	if s.cfg.TrustProxy {
+		// Only enable this when the service is reachable exclusively through a
+		// trusted reverse proxy; otherwise clients can spoof X-Forwarded-For.
+		e.IPExtractor = echo.ExtractIPFromXFFHeader()
+	} else {
+		e.IPExtractor = echo.ExtractIPDirect()
+	}
+
+	if s.cfg.Debug {
+		e.Logger.SetLevel(log.DEBUG)
+	} else {
+		e.Logger.SetLevel(log.INFO)
+	}
+
+	e.HTTPErrorHandler = s.httpErrorHandler
+
+	e.Use(middleware.RequestID())
+	e.Use(s.requestLogger())
+	e.Use(middleware.Recover())
+	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
+		XSSProtection:         "1; mode=block",
+		ContentTypeNosniff:    "nosniff",
+		XFrameOptions:         "DENY",
+		HSTSMaxAge:            31536000,
+		HSTSExcludeSubdomains: false,
+		ReferrerPolicy:        "no-referrer",
+	}))
+	allowCredentials := true
+	if len(s.cfg.CORSAllowedOrigins) == 1 && s.cfg.CORSAllowedOrigins[0] == "*" {
+		// Browsers reject wildcard origins combined with credentials, and the
+		// API uses bearer tokens rather than cookies.
+		allowCredentials = false
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"https://*", "http://*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		AllowCredentials: true,
+		AllowOrigins:     s.cfg.CORSAllowedOrigins,
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderContentType, "X-CSRF-Token", echo.HeaderXRequestID},
+		ExposeHeaders:    []string{echo.HeaderXRequestID, echo.HeaderRetryAfter},
+		AllowCredentials: allowCredentials,
 		MaxAge:           300,
 	}))
-
-	e.Logger.SetLevel(log.DEBUG)
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogStatus: true,
-		LogURI:    true,
-		LogMethod: true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			c.Logger().Infof("method=%s, uri=%s, status=%d", v.Method, v.URI, v.Status)
-			return nil
-		},
-	}))
+	e.Use(middleware.BodyLimit(fmt.Sprintf("%dB", s.cfg.MaxBodyBytes)))
 
 	e.Renderer = NewTemplateRenderer()
 
-	DEBUG(e)
-
 	e.GET("/", func(c echo.Context) error {
-		return c.Redirect(http.StatusMovedPermanently, "/api/v1")
+		return c.Redirect(http.StatusFound, "/api/v1/docs")
+	})
+	e.GET("/api/v1", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{
+			"message": "Gordian API",
+			"docs":    "/api/v1/docs",
+			"health":  "/api/v1/health",
+		})
 	})
 
 	v1 := e.Group("/api/v1")
@@ -64,242 +90,413 @@ func (s *Server) RegisterRoutes() http.Handler {
 		v1.POST("/login", s.Login)
 		v1.GET("/confirm-email/:token", s.ConfirmEmail)
 		v1.GET("/health", s.healthHandler)
+		v1.POST("/resend-confirmation-email", s.ResendConfirmationEmailByEmail)
 
 		v1.POST("/password-reset/initiate", s.PasswordResetInitiate)
 		v1.POST("/password-reset/confirm", s.PasswordResetConfirm)
 
-		v1.GET("/fetchuser", s.FetchUser, s.JWTMiddleware())
-		v1.POST("/fetchuserbyid", s.FetchUserById, s.JWTMiddleware())
-		v1.PUT("/update", s.Update, s.JWTMiddleware())
-		v1.PATCH("/update", s.Update, s.JWTMiddleware())
-		v1.DELETE("/delete", s.Delete, s.JWTMiddleware())
-		v1.GET("/refresh", s.RefreshTokenHandler, s.RefreshTokenMiddleware())
-		v1.GET("/resend-confirmation-email", s.reConfirmEmail, s.JWTMiddleware())
+		auth := s.jwtMiddleware(data.TokenTypeAccess)
+		v1.GET("/fetchuser", s.FetchUser, auth)
+		v1.POST("/fetchuserbyid", s.FetchUserById, auth)
+		v1.PUT("/update", s.Update, auth)
+		v1.PATCH("/update", s.Update, auth)
+		v1.DELETE("/delete", s.Delete, auth)
+		v1.POST("/logout", s.Logout, auth)
+		v1.GET("/resend-confirmation-email", s.reConfirmEmail, auth)
+
+		refresh := s.jwtMiddleware(data.TokenTypeRefresh)
+		v1.GET("/refresh", s.RefreshTokenHandler, refresh)
 
 		v1.GET("/docs/*", echoSwagger.WrapHandler)
 		v1.GET("/docs", func(c echo.Context) error {
-			return c.Redirect(http.StatusMovedPermanently, "/api/v1/docs/index.html")
+			return c.Redirect(http.StatusFound, "/api/v1/docs/index.html")
 		})
 	}
-
-	e.RouteNotFound("/*", func(c echo.Context) error {
-		return c.JSON(http.StatusNotFound, map[string]string{
-			"message": "The requested endpoint does not exist",
-		})
-	})
 
 	return e
 }
 
+func (s *Server) requestLogger() echo.MiddlewareFunc {
+	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogMethod:    true,
+		LogRoutePath: true,
+		LogStatus:    true,
+		LogLatency:   true,
+		LogRemoteIP:  true,
+		LogRequestID: true,
+		LogError:     true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			path := v.RoutePath
+			if path == "" {
+				path = "unmatched"
+			}
+			if v.Error != nil {
+				c.Logger().Errorf(
+					"method=%s path=%s status=%d latency=%s ip=%s request_id=%s error=%v",
+					v.Method, path, v.Status, v.Latency, v.RemoteIP, v.RequestID, v.Error,
+				)
+			} else {
+				c.Logger().Infof(
+					"method=%s path=%s status=%d latency=%s ip=%s request_id=%s",
+					v.Method, path, v.Status, v.Latency, v.RemoteIP, v.RequestID,
+				)
+			}
+			return nil
+		},
+	})
+}
+
+func (s *Server) httpErrorHandler(err error, c echo.Context) {
+	if c.Response().Committed {
+		return
+	}
+
+	code := http.StatusInternalServerError
+	message := "Internal server error"
+
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		code = he.Code
+		if m, ok := he.Message.(string); ok && m != "" {
+			message = m
+		}
+	}
+
+	switch code {
+	case http.StatusNotFound:
+		message = "The requested endpoint does not exist"
+	case http.StatusMethodNotAllowed:
+		message = "Method not allowed"
+	case http.StatusRequestEntityTooLarge:
+		message = "Request body too large"
+	}
+
+	if code >= http.StatusInternalServerError {
+		c.Logger().Errorf("request failed: %v", err)
+	}
+
+	if c.Request().Method == http.MethodHead {
+		_ = c.NoContent(code)
+		return
+	}
+	_ = c.JSON(code, data.MessageResponse{Message: message})
+}
+
+func (s *Server) jwtMiddleware(tokenType string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			rawToken, err := bearerToken(c.Request())
+			if err != nil {
+				return unauthorized(c)
+			}
+
+			claims := &data.Claims{}
+			token, err := jwt.ParseWithClaims(
+				rawToken,
+				claims,
+				func(t *jwt.Token) (any, error) {
+					if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+						return nil, fmt.Errorf("unexpected signing method: %s", t.Method.Alg())
+					}
+					return s.cfg.JWTSecret, nil
+				},
+				jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+				jwt.WithIssuer(data.TokenIssuer),
+				jwt.WithAudience(data.TokenAudience),
+				jwt.WithExpirationRequired(),
+				jwt.WithLeeway(30*time.Second),
+			)
+			if err != nil || !token.Valid || claims.TokenType != tokenType {
+				return unauthorized(c)
+			}
+
+			userID, err := primitive.ObjectIDFromHex(claims.Subject)
+			if err != nil {
+				return unauthorized(c)
+			}
+
+			version, err := s.db.GetTokenVersion(userID)
+			if err != nil {
+				if errors.Is(err, database.ErrUserNotFound) {
+					return unauthorized(c)
+				}
+				c.Logger().Errorf("token version lookup failed: %v", err)
+				return c.JSON(http.StatusServiceUnavailable, data.MessageResponse{Message: "Authentication is temporarily unavailable"})
+			}
+			if version != claims.TokenVersion {
+				return unauthorized(c)
+			}
+
+			c.Set(contextUserIDKey, userID)
+			return next(c)
+		}
+	}
+}
+
+func bearerToken(r *http.Request) (string, error) {
+	value := strings.TrimSpace(r.Header.Get(echo.HeaderAuthorization))
+	if value == "" {
+		return "", errors.New("missing authorization header")
+	}
+	if len(value) > len("Bearer ") && strings.EqualFold(value[:len("Bearer ")], "Bearer ") {
+		value = strings.TrimSpace(value[len("Bearer "):])
+	}
+	if value == "" {
+		return "", errors.New("empty bearer token")
+	}
+	return value, nil
+}
+
+func unauthorized(c echo.Context) error {
+	return c.JSON(http.StatusUnauthorized, data.MessageResponse{Message: "Unauthorized"})
+}
+
+func userIDFromContext(c echo.Context) (primitive.ObjectID, bool) {
+	userID, ok := c.Get(contextUserIDKey).(primitive.ObjectID)
+	return userID, ok
+}
+
+func bindJSON(c echo.Context, dst any) error {
+	if err := c.Bind(dst); err != nil {
+		var he *echo.HTTPError
+		if errors.As(err, &he) {
+			return err
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request format")
+	}
+	return nil
+}
+
+func validationErrorResponse(c echo.Context, err error) error {
+	return c.JSON(http.StatusBadRequest, data.ValidationErrorResponse{
+		Message: "Validation failed",
+		Errors:  data.ValidationErrors(err),
+	})
+}
+
+func (s *Server) tooManyRequests(c echo.Context, retry time.Duration) error {
+	seconds := int(retry.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	c.Response().Header().Set(echo.HeaderRetryAfter, strconv.Itoa(seconds))
+	return c.JSON(http.StatusTooManyRequests, data.MessageResponse{
+		Message: "Too many requests. Please try again later.",
+	})
+}
+
+func clientIP(c echo.Context) string {
+	ip := strings.TrimSpace(c.RealIP())
+	if ip == "" {
+		return "unknown"
+	}
+	return ip
+}
+
+func (s *Server) userResponse(message string, user *data.User) data.UserResponse {
+	return data.UserResponse{
+		Message: message,
+		User: &data.PublicUser{
+			Username:       user.Username,
+			FirstName:      user.FirstName,
+			LastName:       user.LastName,
+			Birthdate:      user.Birthdate,
+			DateJoined:     user.DateJoined,
+			ProfilePicture: user.ProfilePicture,
+			EmailConfirmed: user.EmailConfirmed,
+		},
+	}
+}
+
 // PasswordResetInitiate godoc
 // @Summary Initiate password reset
-// @Description Send a password reset link to the provided email address
+// @Description Sends a password reset token if the account exists. The response is identical for unknown addresses so accounts cannot be enumerated.
 // @Tags Auth
 // @Accept json
 // @Produce json
 // @Param request body data.PasswordResetInitiateRequest true "Password reset request"
-// @Success 200 {object} map[string]string "message: If an account exists with this email, a reset link will be sent"
-// @Failure 400 {object} map[string]string "message: Invalid request format or validation error"
-// @Failure 404 {object} map[string]string "message: No user found with this email"
-// @Failure 500 {object} map[string]string "message: Failed to send password reset email; check if the email is valid"
+// @Success 200 {object} data.MessageResponse "If an account exists with this email, a reset link will be sent"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error"
+// @Failure 429 {object} data.MessageResponse "Too many password reset requests"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /password-reset/initiate [post]
 func (s *Server) PasswordResetInitiate(c echo.Context) error {
 	var req data.PasswordResetInitiateRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	if err := bindJSON(c, &req); err != nil {
+		return err
 	}
-
 	if err := data.Validate.Struct(&req); err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": err.Error(),
-		})
+		return validationErrorResponse(c, err)
 	}
 
-	err := s.db.InitiatePasswordReset(req.Email)
-	if err != nil {
-		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "no user found with email") {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "No user found with this email"})
-		}
-		if strings.Contains(err.Error(), "failed to send password reset email") {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Failed to send password reset email check if the email is valid"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Internal server error"})
+	ip := clientIP(c)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if ok, retry := s.passwordResetLimiter.Hit("reset:" + ip + ":" + email); !ok {
+		return s.tooManyRequests(c, retry)
+	}
+	if ok, retry := s.passwordResetIPLimiter.Hit("reset-ip:" + ip); !ok {
+		return s.tooManyRequests(c, retry)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "If an account exists with this email, a reset link will be sent",
+	if err := s.db.InitiatePasswordReset(req.Email); err != nil && !errors.Is(err, database.ErrEmailSendFailed) {
+		c.Logger().Errorf("password reset initiation failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, data.MessageResponse{
+		Message: "If an account exists with this email, a reset link will be sent",
 	})
 }
 
 // PasswordResetConfirm godoc
 // @Summary Confirm password reset
-// @Description Confirm a password reset using a token and provide a new password
+// @Description Sets a new password using a single-use reset token. All existing sessions are revoked.
 // @Tags Auth
 // @Accept json
 // @Produce json
 // @Param request body data.PasswordResetConfirmRequest true "Password reset confirm request"
-// @Success 200 {object} map[string]string "message: Password reset successfully"
-// @Failure 400 {object} map[string]string "message: Invalid request format, validation error, or invalid/expired reset token"
+// @Success 200 {object} data.MessageResponse "Password reset successfully"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error or invalid/expired reset token"
+// @Failure 429 {object} data.MessageResponse "Too many requests"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /password-reset/confirm [post]
 func (s *Server) PasswordResetConfirm(c echo.Context) error {
 	var req data.PasswordResetConfirmRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	if err := bindJSON(c, &req); err != nil {
+		return err
 	}
-
 	if err := data.Validate.Struct(&req); err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": err.Error(),
-		})
+		return validationErrorResponse(c, err)
 	}
 
 	if err := s.db.ResetPassword(req.Token, req.NewPassword); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"message": "Invalid or expired reset token",
-		})
+		switch {
+		case errors.Is(err, database.ErrTokenInvalid):
+			return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "Invalid or expired reset token"})
+		case errors.Is(err, database.ErrPasswordHashFailed), errors.Is(err, database.ErrDatabase):
+			c.Logger().Errorf("password reset failed: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Internal server error"})
+		default:
+			c.Logger().Errorf("unexpected password reset error: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Internal server error"})
+		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Password reset successfully",
-	})
+	return c.JSON(http.StatusOK, data.MessageResponse{Message: "Password reset successfully"})
 }
 
 // Register godoc
 // @Summary Register a new user
-// @Description Create a new user account and send confirmation email
+// @Description Creates a new account and sends an email confirmation link. If email delivery fails the account is still created; use the resend endpoint.
 // @Tags Auth
 // @Accept json
 // @Produce json
 // @Param request body data.RegisterRequest true "Registration request"
-// @Success 200 {object} map[string]string "message: Registration successful"
-// @Failure 206 {object} map[string]string "message: Registration successful, but confirmation email could not be sent"
-// @Failure 400 {object} map[string]string "message: Invalid registration request format, validation error, or invalid birthdate format"
-// @Failure 409 {object} map[string]string "message: Username or email is already registered"
-// @Failure 500 {object} map[string]string "message: Unable to process password or Registration failed"
+// @Success 201 {object} data.MessageResponse "Registration successful"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error"
+// @Failure 409 {object} data.MessageResponse "Username or email is already registered"
+// @Failure 429 {object} data.MessageResponse "Too many registration attempts"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /register [post]
 func (s *Server) Register(c echo.Context) error {
-	var req data.RegisterRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid registration request format"})
+	if ok, retry := s.registerLimiter.Hit("register:" + clientIP(c)); !ok {
+		return s.tooManyRequests(c, retry)
 	}
 
+	var req data.RegisterRequest
+	if err := bindJSON(c, &req); err != nil {
+		return err
+	}
 	if err := data.Validate.Struct(&req); err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": err.Error(),
-		})
+		return validationErrorResponse(c, err)
 	}
 
 	err := s.db.CreateUser(&req)
-	if err != nil {
-		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "user already exists") {
-			return c.JSON(http.StatusConflict, map[string]string{"message": "Username or email is already registered"})
-		}
-		if strings.Contains(err.Error(), "failed to hash password") {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to process password"})
-		}
-		if strings.Contains(err.Error(), "failed to parse birthdate") {
-			return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid birthdate format"})
-		}
-		if strings.Contains(err.Error(), "failed to send confirmation email") {
-			return c.JSON(http.StatusPartialContent, map[string]string{
-				"message": "Registration successful, but confirmation email could not be sent",
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Registration failed"})
+	switch {
+	case err == nil:
+		return c.JSON(http.StatusCreated, data.MessageResponse{
+			Message: "Registration successful. Please check your email to confirm your account.",
+		})
+	case errors.Is(err, database.ErrEmailSendFailed):
+		c.Logger().Warnf("registration succeeded but confirmation email failed: %v", err)
+		return c.JSON(http.StatusCreated, data.MessageResponse{
+			Message: "Registration successful, but the confirmation email could not be sent. Use the resend confirmation endpoint to try again.",
+		})
+	case errors.Is(err, database.ErrUserExists):
+		return c.JSON(http.StatusConflict, data.MessageResponse{Message: "Username or email is already registered"})
+	case errors.Is(err, database.ErrInvalidBirthdate),
+		errors.Is(err, database.ErrProfilePictureInvalid),
+		errors.Is(err, database.ErrProfilePictureTooLarge):
+		return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: err.Error()})
+	case errors.Is(err, database.ErrPasswordHashFailed), errors.Is(err, database.ErrDatabase):
+		c.Logger().Errorf("registration failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Registration failed"})
+	default:
+		c.Logger().Errorf("unexpected registration error: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Registration failed"})
 	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "Registration successful"})
 }
-
-var loginAttempts = make(map[string][]time.Time)
-
-const (
-	maxLoginAttempts = 5
-	loginWindow      = 10 * time.Minute
-	blockDuration    = 15 * time.Minute
-)
 
 // Login godoc
 // @Summary Login to the application
-// @Description Authenticate with username/email and password
+// @Description Authenticates with username/email and password. Invalid identifiers and passwords return the same response.
 // @Tags Auth
 // @Accept json
 // @Produce json
 // @Param request body data.LoginRequest true "Login request"
-// @Success 200 {object} map[string]any "message: Login successful, user: user object, tokens: token pair"
-// @Failure 400 {object} map[string]string "message: Invalid request format or validation error"
-// @Failure 401 {object} map[string]string "message: Username or email not found or Incorrect password"
-// @Failure 403 {object} map[string]string "message: Email not confirmed. Please confirm your email before logging in."
-// @Failure 429 {object} map[string]string "message: Too many failed login attempts. Please try again later."
-// @Failure 500 {object} map[string]string "message: An error occurred during login or Unable to create session"
+// @Success 200 {object} data.LoginRegisterResponse "Login successful"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error"
+// @Failure 401 {object} data.MessageResponse "Invalid credentials"
+// @Failure 403 {object} data.MessageResponse "Email not confirmed"
+// @Failure 429 {object} data.MessageResponse "Too many failed login attempts"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /login [post]
 func (s *Server) Login(c echo.Context) error {
 	var req data.LoginRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	if err := bindJSON(c, &req); err != nil {
+		return err
 	}
-
 	if err := data.Validate.Struct(&req); err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": err.Error(),
-		})
+		return validationErrorResponse(c, err)
 	}
 
-	ip := c.RealIP()
-	key := ip + ":" + req.Identifier
-	now := time.Now()
-	attempts := loginAttempts[key]
-	var recent []time.Time
-	for _, t := range attempts {
-		if now.Sub(t) < loginWindow {
-			recent = append(recent, t)
-		}
+	ip := clientIP(c)
+	identifier := strings.ToLower(strings.TrimSpace(req.Identifier))
+	loginKey := "login:" + ip + ":" + identifier
+	ipKey := "login-ip:" + ip
+
+	if ok, retry := s.loginIPLimiter.Check(ipKey); !ok {
+		return s.tooManyRequests(c, retry)
 	}
-	if len(recent) >= maxLoginAttempts {
-		lastAttempt := recent[len(recent)-1]
-		if now.Sub(lastAttempt) < blockDuration {
-			return c.JSON(http.StatusTooManyRequests, map[string]string{"message": "Too many failed login attempts. Please try again later."})
-		}
-		recent = []time.Time{}
+	if ok, retry := s.loginLimiter.Check(loginKey); !ok {
+		return s.tooManyRequests(c, retry)
 	}
-	loginAttempts[key] = recent
 
 	user, err := s.db.FindUser(&req)
 	if err != nil {
-		c.Logger().Error(err.Error())
-		if strings.Contains(err.Error(), "user not found") || strings.Contains(err.Error(), "invalid password") {
-			loginAttempts[key] = append(loginAttempts[key], now)
+		if errors.Is(err, database.ErrInvalidCredentials) {
+			s.loginLimiter.Fail(loginKey)
+			s.loginIPLimiter.Fail(ipKey)
+			return c.JSON(http.StatusUnauthorized, data.MessageResponse{Message: "Invalid username/email or password"})
 		}
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Username or email not found"})
-		}
-		if strings.Contains(err.Error(), "invalid password") {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Incorrect password"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred during login"})
+		c.Logger().Errorf("login lookup failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred during login"})
 	}
 
 	if !user.EmailConfirmed {
-		return c.JSON(http.StatusForbidden, map[string]string{"message": "Email not confirmed. Please confirm your email before logging in."})
+		return c.JSON(http.StatusForbidden, data.MessageResponse{
+			Message: "Email not confirmed. Please confirm your email before logging in.",
+		})
 	}
-	delete(loginAttempts, key)
 
 	tokens, err := s.db.CreateSession(user.ID)
 	if err != nil {
-		c.Logger().Error(err.Error())
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to create session"})
+		c.Logger().Errorf("session creation failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Unable to create session"})
 	}
+
+	s.loginLimiter.Reset(loginKey)
+	s.loginIPLimiter.Reset(ipKey)
 
 	return c.JSON(http.StatusOK, data.LoginRegisterResponse{
 		Message: "Login successful",
@@ -310,475 +507,421 @@ func (s *Server) Login(c echo.Context) error {
 
 // ConfirmEmail godoc
 // @Summary Confirm email address
-// @Description Confirm a user's email using a token sent by email. Renders a confirmation page.
+// @Description Confirms an email address using the token sent by email and renders a confirmation page.
 // @Tags Auth
-// @Accept  json
-// @Produce  html
+// @Produce html
 // @Param token path string true "Confirmation token"
 // @Success 200 {string} string "HTML page with success message"
 // @Failure 400 {string} string "HTML page with failure message"
+// @Failure 500 {string} string "HTML page with failure message"
 // @Router /confirm-email/{token} [get]
 func (s *Server) ConfirmEmail(c echo.Context) error {
 	token := c.Param("token")
-	c.Logger().Infof("Received email confirmation token: %s", token)
+	year := time.Now().Year()
 
-	confirmed, message := s.db.ConfirmEmail(token)
-	c.Logger().Infof("Email confirmation result: confirmed=%v, message=%s", confirmed, message)
-
-	if !confirmed {
-		c.Logger().Errorf("Email confirmation failed: %s", message)
+	err := s.db.ConfirmEmail(token)
+	switch {
+	case err == nil:
+		return c.Render(http.StatusOK, "confirmation_page.html", map[string]any{
+			"Success": true,
+			"Message": "Your email address has been confirmed. You can now log in.",
+			"Year":    year,
+		})
+	case errors.Is(err, database.ErrEmailAlreadyConfirmed):
+		return c.Render(http.StatusOK, "confirmation_page.html", map[string]any{
+			"Success": true,
+			"Message": "Your email address is already confirmed.",
+			"Year":    year,
+		})
+	case errors.Is(err, database.ErrTokenInvalid):
 		return c.Render(http.StatusBadRequest, "confirmation_page.html", map[string]any{
 			"Success": false,
-			"Message": message,
-			"Year":    time.Now().Year(),
+			"Message": "This confirmation link is invalid or has expired.",
+			"Year":    year,
+		})
+	default:
+		c.Logger().Errorf("email confirmation failed: %v", err)
+		return c.Render(http.StatusInternalServerError, "confirmation_page.html", map[string]any{
+			"Success": false,
+			"Message": "We could not confirm your email address. Please try again later.",
+			"Year":    year,
 		})
 	}
+}
 
-	return c.Render(http.StatusOK, "confirmation_page.html", map[string]any{
-		"Success": true,
-		"Message": message,
-		"Year":    time.Now().Year(),
+// ResendConfirmationEmailByEmail godoc
+// @Summary Resend confirmation email by address
+// @Description Sends a new confirmation email when an unconfirmed account exists. Always returns the same response.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body data.ResendConfirmationRequest true "Email address"
+// @Success 200 {object} data.MessageResponse "If an account exists and is unconfirmed, an email will be sent"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error"
+// @Failure 429 {object} data.MessageResponse "Too many requests"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
+// @Router /resend-confirmation-email [post]
+func (s *Server) ResendConfirmationEmailByEmail(c echo.Context) error {
+	var req data.ResendConfirmationRequest
+	if err := bindJSON(c, &req); err != nil {
+		return err
+	}
+	if err := data.Validate.Struct(&req); err != nil {
+		return validationErrorResponse(c, err)
+	}
+
+	ip := clientIP(c)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if ok, retry := s.resendLimiter.Hit("resend:" + ip + ":" + email); !ok {
+		return s.tooManyRequests(c, retry)
+	}
+	if ok, retry := s.resendIPLimiter.Hit("resend-ip:" + ip); !ok {
+		return s.tooManyRequests(c, retry)
+	}
+
+	if err := s.db.ResendConfirmationEmailByEmail(req.Email); err != nil && !errors.Is(err, database.ErrEmailSendFailed) {
+		c.Logger().Errorf("resend confirmation failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, data.MessageResponse{
+		Message: "If an account exists with this email, a confirmation email has been sent",
 	})
 }
 
 // reConfirmEmail godoc
-// @Summary Resend confirmation email
-// @Description Resend the email confirmation to the authenticated user
+// @Summary Resend confirmation email (authenticated)
+// @Description Resends the email confirmation to the authenticated user. Prefer the unauthenticated POST variant when login is blocked.
 // @Tags Users
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {object} map[string]string "message: Confirmation email sent successfully"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 404 {object} map[string]string "message: User profile not found"
-// @Failure 409 {object} map[string]string "message: Email is already confirmed"
-// @Failure 429 {object} map[string]string "message: Too many confirmation email requests or Please wait 5 minutes before requesting another confirmation email"
-// @Failure 500 {object} map[string]string "message: Unable to resend confirmation email"
+// @Success 200 {object} data.MessageResponse "Confirmation email sent successfully"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 404 {object} data.MessageResponse "User profile not found"
+// @Failure 409 {object} data.MessageResponse "Email is already confirmed"
+// @Failure 429 {object} data.MessageResponse "Too many confirmation email requests"
+// @Failure 500 {object} data.MessageResponse "Unable to resend confirmation email"
 // @Router /resend-confirmation-email [get]
 func (s *Server) reConfirmEmail(c echo.Context) error {
-	userID := c.Get("user_id").(primitive.ObjectID)
-	err := s.db.ResendConfirmationEmail(userID)
-	if err != nil {
-		c.Logger().Error("ReConfirmEmail error:", err)
-		if strings.Contains(err.Error(), "already confirmed") {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"message": "Email is already confirmed",
-			})
-		}
-		if strings.Contains(err.Error(), "too many attempts") {
-			return c.JSON(http.StatusTooManyRequests, map[string]string{
-				"message": "Too many confirmation email requests. Please try again later.",
-			})
-		}
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"message": "User profile not found",
-			})
-		}
-		if strings.Contains(err.Error(), "please wait 5 minutes before requesting another confirmation email") {
-			return c.JSON(http.StatusTooManyRequests, map[string]string{
-				"message": "Please wait 5 minutes before requesting another confirmation email",
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"message": "Unable to resend confirmation email",
-		})
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Confirmation email sent successfully",
-	})
+	if err := s.db.ResendConfirmationEmail(userID); err != nil {
+		switch {
+		case errors.Is(err, database.ErrEmailAlreadyConfirmed):
+			return c.JSON(http.StatusConflict, data.MessageResponse{Message: "Email is already confirmed"})
+		case errors.Is(err, database.ErrConfirmationLimit):
+			return c.JSON(http.StatusTooManyRequests, data.MessageResponse{Message: "Too many confirmation email requests. Please try again later."})
+		case errors.Is(err, database.ErrConfirmationCooldown):
+			return c.JSON(http.StatusTooManyRequests, data.MessageResponse{Message: "Please wait 5 minutes before requesting another confirmation email"})
+		case errors.Is(err, database.ErrUserNotFound):
+			return c.JSON(http.StatusNotFound, data.MessageResponse{Message: "User profile not found"})
+		case errors.Is(err, database.ErrEmailSendFailed):
+			c.Logger().Errorf("resend confirmation failed: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Unable to resend confirmation email"})
+		default:
+			c.Logger().Errorf("unexpected resend confirmation error: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Unable to resend confirmation email"})
+		}
+	}
+
+	return c.JSON(http.StatusOK, data.MessageResponse{Message: "Confirmation email sent successfully"})
 }
 
 // FetchUser godoc
 // @Summary Fetch current user
-// @Description Retrieve the authenticated user's profile
+// @Description Retrieves the authenticated user's profile.
 // @Tags Users
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {object} map[string]any "message: User profile retrieved successfully, user: user object"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 404 {object} map[string]string "message: Your user profile could not be retrieved"
-// @Failure 500 {object} map[string]string "message: An error occurred while fetching your profile"
+// @Success 200 {object} data.UserResponse "User profile retrieved successfully"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 404 {object} data.MessageResponse "User profile not found"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /fetchuser [get]
 func (s *Server) FetchUser(c echo.Context) error {
-	userID := c.Get("user_id").(primitive.ObjectID)
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
+	}
+
 	user, err := s.db.GetUser(userID)
 	if err != nil {
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "Your user profile could not be retrieved"})
+		if errors.Is(err, database.ErrUserNotFound) {
+			return c.JSON(http.StatusNotFound, data.MessageResponse{Message: "Your user profile could not be retrieved"})
 		}
-		c.Logger().Error("GetUser error:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while fetching your profile"})
+		c.Logger().Errorf("get user failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while fetching your profile"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"message": "User profile retrieved successfully", "user": user})
+
+	return c.JSON(http.StatusOK, s.userResponse("User profile retrieved successfully", user))
 }
 
 // FetchUserById godoc
 // @Summary Fetch user by ID
-// @Description Retrieve a user's public profile by user ID
+// @Description Retrieves a limited public profile by user ID. Birthdate, email and confirmation state are never returned.
 // @Tags Users
 // @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param request body object true "{\"user_id\": \"<objectId>\"}"
-// @Success 200 {object} map[string]any "message: User fetched successfully, user: {username, first_name, last_name, birthdate, date_joined}"
-// @Failure 400 {object} map[string]any "message: Invalid request or validation errors or Invalid user ID format"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 404 {object} map[string]string "message: The specified user could not be found"
-// @Failure 500 {object} map[string]string "message: An error occurred while retrieving user information or An unexpected error occurred"
+// @Param request body data.FetchUserByIDRequest true "User ID"
+// @Success 200 {object} data.PublicProfileResponse "User fetched successfully"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error or invalid user ID format"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 404 {object} data.MessageResponse "The specified user could not be found"
+// @Failure 429 {object} data.MessageResponse "Too many requests"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /fetchuserbyid [post]
 func (s *Server) FetchUserById(c echo.Context) error {
-	var req struct {
-		ID string `json:"user_id" validate:"required"`
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
+	}
+	if ok, retry := s.lookupLimiter.Hit("lookup:" + userID.Hex()); !ok {
+		return s.tooManyRequests(c, retry)
 	}
 
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error("Bind error: ", err)
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+	var req data.FetchUserByIDRequest
+	if err := bindJSON(c, &req); err != nil {
+		return err
+	}
+	if err := data.Validate.Struct(&req); err != nil {
+		return validationErrorResponse(c, err)
 	}
 
-	type userIdRequest struct {
-		ID string `json:"user_id" validate:"required"`
-	}
-	reqObj := userIdRequest{ID: req.ID}
-	if errors := data.Validate.Struct(reqObj); errors != nil {
-		var validationErrors = make(map[string]string)
-		if ve, ok := errors.(validator.ValidationErrors); ok {
-			for _, e := range ve {
-				field := e.Field()
-				switch e.Tag() {
-				case "required":
-					validationErrors[field] = field + " is required"
-				default:
-					validationErrors[field] = e.Error()
-				}
-			}
-		} else {
-			validationErrors["general"] = errors.Error()
-		}
-		return c.JSON(http.StatusBadRequest, map[string]any{"errors": validationErrors})
-	}
-
-	objID, err := primitive.ObjectIDFromHex(req.ID)
+	objectID, err := primitive.ObjectIDFromHex(req.ID)
 	if err != nil {
-		c.Logger().Error("Invalid ObjectID:", err)
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid user ID format"})
+		return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "Invalid user ID format"})
 	}
 
-	user, err := s.db.GetUser(objID)
+	user, err := s.db.GetUser(objectID)
 	if err != nil {
-		if strings.Contains(err.Error(), "user not found") {
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "The specified user could not be found"})
+		if errors.Is(err, database.ErrUserNotFound) {
+			return c.JSON(http.StatusNotFound, data.MessageResponse{Message: "The specified user could not be found"})
 		}
-		if strings.Contains(err.Error(), "db error") {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while retrieving user information"})
-		}
-		c.Logger().Error("Unexpected error in FetchUserById:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An unexpected error occurred"})
+		c.Logger().Errorf("fetch user by id failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while retrieving user information"})
 	}
 
-	type UserResponse struct {
-		Username   string    `json:"username"`
-		FistName   string    `json:"first_name"`
-		LastName   string    `json:"last_name"`
-		BirthDate  time.Time `json:"birthdate"`
-		DateJoined time.Time `json:"date_joined"`
-	}
-	response := UserResponse{
-		Username:   user.Username,
-		FistName:   user.FirstName,
-		LastName:   user.LastName,
-		BirthDate:  user.Birthdate,
-		DateJoined: user.DateJoined,
-	}
-	return c.JSON(http.StatusOK, map[string]any{
-		"message": "User fetched successfully",
-		"user":    response,
+	return c.JSON(http.StatusOK, data.PublicProfileResponse{
+		Message: "User fetched successfully",
+		User: &data.PublicProfile{
+			Username:       user.Username,
+			FirstName:      user.FirstName,
+			LastName:       user.LastName,
+			DateJoined:     user.DateJoined,
+			ProfilePicture: user.ProfilePicture,
+		},
 	})
 }
 
 // Update godoc
 // @Summary Update user profile
-// @Description Update fields of the authenticated user's profile
+// @Description Updates the authenticated user's profile. Changing the email or password requires current_password; a password change also revokes all existing sessions and returns a new token pair.
 // @Tags Users
 // @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param request body data.UpdateRequest true "Update request"
-// @Success 200 {object} map[string]any "message: Profile updated successfully, user: updated user object"
-// @Failure 400 {object} map[string]string "message: Invalid request format, validation error, No update fields provided, or Invalid birthdate format"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 404 {object} map[string]string "message: Your user profile could not be found"
-// @Failure 409 {object} map[string]string "message: Username is already taken or Email is already registered"
-// @Failure 500 {object} map[string]string "message: Unable to process password update, An error occurred while updating your profile, An error occurred while updating your profile picture, or Unable to check uniqueness of username or email"
+// @Success 200 {object} data.UserResponse "Profile updated successfully"
+// @Failure 400 {object} data.ValidationErrorResponse "Validation error, no update fields, or missing current password"
+// @Failure 401 {object} data.MessageResponse "Unauthorized or current password incorrect"
+// @Failure 404 {object} data.MessageResponse "User profile not found"
+// @Failure 409 {object} data.MessageResponse "Username or email is already registered"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /update [put]
 // @Router /update [patch]
 func (s *Server) Update(c echo.Context) error {
 	var req data.UpdateRequest
-	if err := c.Bind(&req); err != nil {
-		c.Logger().Error("Bind error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request format"})
+	if err := bindJSON(c, &req); err != nil {
+		return err
 	}
-
 	if err := data.Validate.Struct(&req); err != nil {
-		c.Logger().Error("Validation error:", err)
-		return c.JSON(http.StatusBadRequest, map[string]any{
-			"message": err.Error(),
-		})
+		return validationErrorResponse(c, err)
 	}
 
-	userID := c.Get("user_id").(primitive.ObjectID)
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
+	}
+
 	updatedUser, err := s.db.UpdateUser(userID, &req)
 	if err != nil {
-		c.Logger().Error("UpdateUser error:", err)
-
-		errStr := err.Error()
 		switch {
-		case strings.Contains(errStr, "user not found"):
-			return c.JSON(http.StatusNotFound, map[string]string{"message": "Your user profile could not be found"})
-		case strings.Contains(errStr, "no fields to update"):
-			return c.JSON(http.StatusBadRequest, map[string]string{"message": "No update fields provided"})
-		case strings.Contains(errStr, "password hashing failed"):
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to process password update"})
-		case strings.Contains(errStr, "failed to parse birthdate"):
-			return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid birthdate format"})
-		case strings.Contains(errStr, "failed to update user"):
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile"})
-		case strings.Contains(errStr, "failed to update profile picture"):
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "An error occurred while updating your profile picture"})
-		case strings.Contains(errStr, "username already exists"):
-			return c.JSON(http.StatusConflict, map[string]string{"message": "Username is already taken"})
-		case strings.Contains(errStr, "email already exists"):
-			return c.JSON(http.StatusConflict, map[string]string{"message": "Email is already registered"})
-		case strings.Contains(errStr, "failed to check username uniqueness") || strings.Contains(errStr, "failed to check email uniqueness"):
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unable to check uniqueness of username or email"})
+		case errors.Is(err, database.ErrUserNotFound):
+			return c.JSON(http.StatusNotFound, data.MessageResponse{Message: "Your user profile could not be found"})
+		case errors.Is(err, database.ErrNoFieldsToUpdate):
+			return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "No update fields provided"})
+		case errors.Is(err, database.ErrCurrentPasswordNeeded):
+			return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "current_password is required when changing your email or password"})
+		case errors.Is(err, database.ErrInvalidCurrentPassword):
+			return c.JSON(http.StatusUnauthorized, data.MessageResponse{Message: "Current password is incorrect"})
+		case errors.Is(err, database.ErrUsernameTaken):
+			return c.JSON(http.StatusConflict, data.MessageResponse{Message: "Username is already taken"})
+		case errors.Is(err, database.ErrEmailTaken), errors.Is(err, database.ErrUserExists):
+			return c.JSON(http.StatusConflict, data.MessageResponse{Message: "Email is already registered"})
+		case errors.Is(err, database.ErrInvalidBirthdate):
+			return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: "Invalid birthdate format"})
+		case errors.Is(err, database.ErrProfilePictureInvalid),
+			errors.Is(err, database.ErrProfilePictureTooLarge):
+			return c.JSON(http.StatusBadRequest, data.MessageResponse{Message: err.Error()})
+		case errors.Is(err, database.ErrPasswordHashFailed), errors.Is(err, database.ErrDatabase):
+			c.Logger().Errorf("profile update failed: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while updating your profile"})
+		case errors.Is(err, database.ErrEmailSendFailed):
+			if updatedUser == nil {
+				c.Logger().Errorf("profile update failed: %v", err)
+				return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while updating your profile"})
+			}
+			response := s.userResponse("Profile updated, but the confirmation email could not be sent. Use the resend confirmation endpoint to try again.", updatedUser)
+			s.attachTokens(userID, &response, req.Password != "")
+			return c.JSON(http.StatusOK, response)
 		default:
-			return c.JSON(http.StatusInternalServerError, map[string]string{"message": "Unexpected error during profile update"})
+			c.Logger().Errorf("unexpected profile update error: %v", err)
+			return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An unexpected error occurred"})
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
-		"message": "Profile updated successfully",
-		"user":    updatedUser,
-	})
+	message := "Profile updated successfully"
+	if req.Email != "" && !updatedUser.EmailConfirmed {
+		message = "Profile updated. Please confirm your new email address before logging in again."
+	}
+	response := s.userResponse(message, updatedUser)
+	s.attachTokens(userID, &response, req.Password != "")
+	return c.JSON(http.StatusOK, response)
+}
+
+func (s *Server) attachTokens(userID primitive.ObjectID, response *data.UserResponse, passwordChanged bool) {
+	if !passwordChanged {
+		return
+	}
+	tokens, err := s.db.CreateSession(userID)
+	if err != nil {
+		log.Printf("password changed but new session tokens could not be created: %v", err)
+		return
+	}
+	response.Tokens = tokens
 }
 
 // Delete godoc
 // @Summary Delete user account
-// @Description Permanently delete the authenticated user's account
+// @Description Permanently deletes the authenticated user's account.
 // @Tags Users
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {object} map[string]string "message: Account deleted successfully"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 500 {object} map[string]string "message: An error occurred while deleting your account or Unexpected error during account deletion"
+// @Success 200 {object} data.MessageResponse "Account deleted successfully"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 404 {object} data.MessageResponse "Account not found or already deleted"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /delete [delete]
 func (s *Server) Delete(c echo.Context) error {
-	userID := c.Get("user_id").(primitive.ObjectID)
-	err := s.db.DeleteUser(userID)
-	if err != nil {
-		c.Logger().Error("DeleteUser error:", err)
-		if strings.Contains(err.Error(), "failed to delete user") {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"message": "An error occurred while deleting your account",
-			})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"message": "Unexpected error during account deletion",
-		})
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
 	}
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Account deleted successfully",
-	})
+
+	if err := s.db.DeleteUser(userID); err != nil {
+		if errors.Is(err, database.ErrUserNotFound) {
+			return c.JSON(http.StatusNotFound, data.MessageResponse{Message: "Account not found or already deleted"})
+		}
+		c.Logger().Errorf("delete user failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while deleting your account"})
+	}
+
+	return c.JSON(http.StatusOK, data.MessageResponse{Message: "Account deleted successfully"})
+}
+
+// Logout godoc
+// @Summary Log out
+// @Description Revokes all access and refresh tokens for the authenticated user.
+// @Tags Auth
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} data.MessageResponse "Logged out successfully"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
+// @Router /logout [post]
+func (s *Server) Logout(c echo.Context) error {
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
+	}
+
+	if err := s.db.RevokeSessions(userID); err != nil {
+		if errors.Is(err, database.ErrUserNotFound) {
+			return unauthorized(c)
+		}
+		c.Logger().Errorf("logout failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "An error occurred while logging out"})
+	}
+
+	return c.JSON(http.StatusOK, data.MessageResponse{Message: "Logged out successfully"})
 }
 
 // RefreshTokenHandler godoc
 // @Summary Refresh authentication tokens
-// @Description Exchange a valid refresh token for a new access/refresh token pair
+// @Description Exchanges a valid refresh token for a new token pair. Deleted users, revoked sessions and unconfirmed email addresses are rejected.
 // @Tags Auth
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {object} map[string]any "message: Tokens refreshed successfully, tokens: token pair"
-// @Failure 401 {object} map[string]string "message: Unauthorized (handled by middleware)"
-// @Failure 500 {object} map[string]string "message: Unable to refresh authentication tokens"
+// @Success 200 {object} data.TokenResponse "Tokens refreshed successfully"
+// @Failure 401 {object} data.MessageResponse "Unauthorized"
+// @Failure 403 {object} data.MessageResponse "Email not confirmed"
+// @Failure 500 {object} data.MessageResponse "Internal server error"
 // @Router /refresh [get]
 func (s *Server) RefreshTokenHandler(c echo.Context) error {
-	userID := c.Get("user_id").(primitive.ObjectID)
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		return unauthorized(c)
+	}
+
+	user, err := s.db.GetUser(userID)
+	if err != nil {
+		if errors.Is(err, database.ErrUserNotFound) {
+			return unauthorized(c)
+		}
+		c.Logger().Errorf("refresh user lookup failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Unable to refresh authentication tokens"})
+	}
+	if !user.EmailConfirmed {
+		return c.JSON(http.StatusForbidden, data.MessageResponse{Message: "Email not confirmed. Please confirm your email before refreshing your session."})
+	}
+
 	tokens, err := s.db.CreateSession(userID)
 	if err != nil {
-		c.Logger().Error("RefreshToken error:", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"message": "Unable to refresh authentication tokens",
-		})
+		if errors.Is(err, database.ErrUserNotFound) {
+			return unauthorized(c)
+		}
+		c.Logger().Errorf("token refresh failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, data.MessageResponse{Message: "Unable to refresh authentication tokens"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{
-		"message": "Tokens refreshed successfully",
-		"tokens":  tokens,
+
+	return c.JSON(http.StatusOK, data.TokenResponse{
+		Message: "Tokens refreshed successfully",
+		Tokens:  tokens,
 	})
 }
 
 // healthHandler godoc
 // @Summary Service health check
-// @Description Returns service health status and details
+// @Description Returns service health status and details.
 // @Tags Health
 // @Produce json
-// @Success 200 {object} map[string]any "status: ok, details: health details"
-// @Failure 503 {object} map[string]any "status: error, message: Service health check failed"
+// @Success 200 {object} data.HealthResponse "Service is healthy"
+// @Failure 503 {object} data.MessageResponse "Service health check failed"
 // @Router /health [get]
 func (s *Server) healthHandler(c echo.Context) error {
 	status, err := s.db.Health()
 	if err != nil {
-		c.Logger().Error("Health check error:", err)
-		return c.JSON(http.StatusServiceUnavailable, map[string]any{
-			"status":  "error",
-			"message": "Service health check failed",
-		})
+		c.Logger().Errorf("health check failed: %v", err)
+		return c.JSON(http.StatusServiceUnavailable, data.MessageResponse{Message: "Service health check failed"})
 	}
-	return c.JSON(http.StatusOK, map[string]any{
-		"status":  "ok",
-		"details": status,
-	})
-}
 
-func (s *Server) JWTMiddleware() echo.MiddlewareFunc {
-	if len(jwtSecret) == 0 {
-		panic("JWT secret is not set. Set JWTSECRET environment variable.")
+	details := make(map[string]any, len(status))
+	for key, value := range status {
+		details[key] = value
 	}
-	config := echojwt.Config{
-		SigningKey: jwtSecret,
-		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
-			tokenString := auth
-			if strings.HasPrefix(auth, "Bearer ") {
-				tokenString = strings.TrimPrefix(auth, "Bearer ")
-			}
-			if tokenString == "" {
-				c.Logger().Error("Missing JWT token")
-				return nil, errors.New("missing token")
-			}
-			claims := &jwt.RegisteredClaims{}
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
-				if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-				}
-				return jwtSecret, nil
-			})
-			if err != nil {
-				c.Logger().Errorf("Token parsing error: %v", err)
-				return nil, err
-			}
-			if !token.Valid {
-				c.Logger().Error("Token is invalid")
-				return nil, errors.New("invalid token")
-			}
-			if claims.ID != "access" {
-				c.Logger().Errorf("Invalid token type: %s", claims.ID)
-				return nil, errors.New("invalid token type")
-			}
-			userID, err := primitive.ObjectIDFromHex(claims.Subject)
-			if err != nil {
-				c.Logger().Errorf("Invalid user ID in token: %v", err)
-				return nil, fmt.Errorf("invalid user ID: %v", err)
-			}
-			c.Set("user_id", userID)
-			return token, nil
-		},
-		TokenLookup: "header:Authorization",
-		ErrorHandler: func(c echo.Context, err error) error {
-			c.Logger().Errorf("JWT Error: %v", err)
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"message": fmt.Sprintf("Unauthorized: %v", err.Error()),
-			})
-		},
-	}
-	return echojwt.WithConfig(config)
-}
-
-func (s *Server) RefreshTokenMiddleware() echo.MiddlewareFunc {
-	if len(jwtSecret) == 0 {
-		panic("JWT secret is not set. Set JWTSECRET environment variable.")
-	}
-	config := echojwt.Config{
-		SigningKey: jwtSecret,
-		ParseTokenFunc: func(c echo.Context, auth string) (any, error) {
-			tokenString := auth
-			if strings.HasPrefix(auth, "Bearer ") {
-				tokenString = strings.TrimPrefix(auth, "Bearer ")
-			}
-			if tokenString == "" {
-				c.Logger().Error("Missing JWT token")
-				return nil, errors.New("missing token")
-			}
-			claims := &jwt.RegisteredClaims{}
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
-				if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-				}
-				return jwtSecret, nil
-			})
-			if err != nil {
-				c.Logger().Errorf("Token parsing error: %v", err)
-				return nil, err
-			}
-			if !token.Valid {
-				c.Logger().Error("Token is invalid")
-				return nil, errors.New("invalid token")
-			}
-			if claims.ID != "refresh" {
-				c.Logger().Errorf("Invalid token type: %s", claims.ID)
-				return nil, errors.New("invalid token type")
-			}
-			userID, err := primitive.ObjectIDFromHex(claims.Subject)
-			if err != nil {
-				c.Logger().Errorf("Invalid user ID in token: %v", err)
-				return nil, fmt.Errorf("invalid user ID: %v", err)
-			}
-			c.Set("user_id", userID)
-			return token, nil
-		},
-		TokenLookup: "header:Authorization",
-		ErrorHandler: func(c echo.Context, err error) error {
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"message": fmt.Sprintf("Unauthorized: %v", err.Error()),
-			})
-		},
-	}
-	return echojwt.WithConfig(config)
-}
-
-func DEBUG(e *echo.Echo) {
-	if debug {
-		e.Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
-			if len(reqBody) > 0 {
-				var formattedReq any
-				if err := json.Unmarshal(reqBody, &formattedReq); err != nil {
-					log.Printf("Request Body (raw): \n%s\n", string(reqBody))
-					c.Logger().Error("Error parsing request body: " + err.Error())
-				} else {
-					reqBodyJson, err := json.MarshalIndent(formattedReq, "", "  ")
-					if err != nil {
-						log.Printf("Request Body (raw): \n%s\n", string(reqBody))
-						c.Logger().Error("Error marshaling request body: " + err.Error())
-					} else {
-						c.Logger().Debug("Request Body:\n" + string(reqBodyJson))
-					}
-				}
-			}
-
-			if len(resBody) > 0 {
-				var formattedRes any
-				if err := json.Unmarshal(resBody, &formattedRes); err != nil {
-					log.Printf("Response Body (raw): \n%s\n", string(resBody))
-					c.Logger().Error("Error parsing response body: " + err.Error())
-				} else {
-					resBodyJson, err := json.MarshalIndent(formattedRes, "", "  ")
-					if err != nil {
-						log.Printf("Response Body (raw): \n%s\n", string(resBody))
-						c.Logger().Error("Error marshaling response body: " + err.Error())
-					} else {
-						c.Logger().Debug("Response Body:\n" + string(resBodyJson))
-					}
-				}
-			}
-		}))
-	}
+	return c.JSON(http.StatusOK, data.HealthResponse{Status: "ok", Details: details})
 }

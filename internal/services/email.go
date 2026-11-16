@@ -2,59 +2,110 @@ package services
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
+	"net/mail"
 	"net/smtp"
-	"os"
+	"net/url"
+	"strings"
 	"time"
 
-	"github.com/labstack/gommon/log"
+	"github.com/google/uuid"
 	"github.com/mAmineChniti/Gordian/internal/templates"
 )
+
+var ErrEmailNotConfigured = errors.New("email service is not configured")
 
 type EmailService interface {
 	SendConfirmationEmail(email, token string) error
 	SendPasswordResetEmail(toEmail, resetToken string) error
+	SendEmailChangedNotice(oldEmail, newEmail string) error
+}
+
+type disabledEmailService struct{}
+
+func NewDisabledEmailService() EmailService {
+	return disabledEmailService{}
+}
+
+func (disabledEmailService) SendConfirmationEmail(string, string) error {
+	return ErrEmailNotConfigured
+}
+
+func (disabledEmailService) SendPasswordResetEmail(string, string) error {
+	return ErrEmailNotConfigured
+}
+
+func (disabledEmailService) SendEmailChangedNotice(string, string) error {
+	return ErrEmailNotConfigured
 }
 
 type GmailSMTPEmailService struct {
-	from     string
-	password string
-	smtpHost string
-	smtpPort string
+	from              string
+	password          string
+	smtpHost          string
+	smtpPort          string
+	baseURL           string
+	confirmationTmpl  *template.Template
+	passwordResetTmpl *template.Template
 }
 
-var (
-	gmailUsername = os.Getenv("GMAIL_USERNAME")
-	gmailPassword = os.Getenv("GMAIL_APP_PASSWORD")
-)
+func NewGmailSMTPEmailService(username, password, baseURL string) (EmailService, error) {
+	if strings.TrimSpace(username) == "" || password == "" {
+		return nil, errors.New("GMAIL_USERNAME and GMAIL_APP_PASSWORD are required")
+	}
 
-func NewGmailSMTPEmailService() *GmailSMTPEmailService {
-	if gmailUsername == "" || gmailPassword == "" {
-		log.Error("GMAIL_USERNAME or GMAIL_APP_PASSWORD not set")
+	parsedFrom, err := mail.ParseAddress(username)
+	if err != nil {
+		return nil, fmt.Errorf("invalid GMAIL_USERNAME: %w", err)
+	}
+
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, errors.New("APP_BASE_URL is required")
+	}
+	if u, err := url.Parse(baseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("APP_BASE_URL must be an absolute http(s) URL, got %q", baseURL)
+	}
+
+	confirmationTmpl, err := parseTemplate("confirmation_email.html")
+	if err != nil {
+		return nil, err
+	}
+	passwordResetTmpl, err := parseTemplate("password_reset.html")
+	if err != nil {
+		return nil, err
 	}
 
 	return &GmailSMTPEmailService{
-		from:     gmailUsername,
-		password: gmailPassword,
-		smtpHost: "smtp.gmail.com",
-		smtpPort: "587",
-	}
+		from:              parsedFrom.Address,
+		password:          password,
+		smtpHost:          "smtp.gmail.com",
+		smtpPort:          "587",
+		baseURL:           baseURL,
+		confirmationTmpl:  confirmationTmpl,
+		passwordResetTmpl: passwordResetTmpl,
+	}, nil
 }
 
-func (s *GmailSMTPEmailService) SendConfirmationEmail(email, token string) error {
-	confirmationLink := fmt.Sprintf("https://gordian.onrender.com/api/v1/confirm-email/%s", token)
-
-	templatePath := templates.FindTemplate("confirmation_email.html")
+func parseTemplate(filename string) (*template.Template, error) {
+	templatePath := templates.FindTemplate(filename)
 	if templatePath == "" {
-		return fmt.Errorf("email template not found")
+		return nil, fmt.Errorf("email template %s not found", filename)
 	}
 
 	tmpl, err := template.ParseFiles(templatePath)
 	if err != nil {
-		return fmt.Errorf("failed to parse email template: %w", err)
+		return nil, fmt.Errorf("failed to parse email template %s: %w", filename, err)
 	}
+	return tmpl, nil
+}
 
+func (s *GmailSMTPEmailService) SendConfirmationEmail(email, token string) error {
+	confirmationLink := fmt.Sprintf("%s/api/v1/confirm-email/%s", s.baseURL, url.PathEscape(token))
+
+	var buf bytes.Buffer
 	data := struct {
 		Year             int
 		ConfirmationLink string
@@ -62,81 +113,85 @@ func (s *GmailSMTPEmailService) SendConfirmationEmail(email, token string) error
 		Year:             time.Now().Year(),
 		ConfirmationLink: confirmationLink,
 	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := s.confirmationTmpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("failed to execute email template: %w", err)
 	}
 
-	fromHeader := fmt.Sprintf("From: Gordian <%s>\r\n", s.from)
-	toHeader := fmt.Sprintf("To: %s\r\n", email)
-	subject := "Subject: Confirm Your Gordian Account\r\n"
-	mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
-
-	message := []byte(fromHeader + toHeader + subject + mime + "\r\n" + buf.String())
-
-	auth := smtp.PlainAuth("", s.from, s.password, s.smtpHost)
-
-	err = smtp.SendMail(
-		s.smtpHost+":"+s.smtpPort,
-		auth,
-		s.from,
-		[]string{email},
-		message,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-
-	return nil
+	return s.send(email, "Confirm Your Gordian Account", "text/html", buf.String())
 }
 
 func (s *GmailSMTPEmailService) SendPasswordResetEmail(toEmail, resetToken string) error {
-
-	var emailBody bytes.Buffer
-	templatePath := templates.FindTemplate("password_reset.html")
-	if templatePath == "" {
-		return fmt.Errorf("password reset template not found")
-	}
-
-	tmpl, err := template.ParseFiles(templatePath)
-	if err != nil {
-		return fmt.Errorf("failed to parse password reset template: %v", err)
-	}
-
-	templateData := struct {
+	var buf bytes.Buffer
+	data := struct {
 		Year  int
 		Token string
 	}{
 		Year:  time.Now().Year(),
 		Token: resetToken,
 	}
-
-	if err := tmpl.Execute(&emailBody, templateData); err != nil {
-		return fmt.Errorf("failed to execute password reset template: %v", err)
+	if err := s.passwordResetTmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("failed to execute password reset template: %w", err)
 	}
 
-	fromHeader := fmt.Sprintf("From: Gordian <%s>\r\n", s.from)
-	toHeader := fmt.Sprintf("To: %s\r\n", toEmail)
-	subject := "Subject: Password Reset Request for Gordian\r\n"
-	mime := "MIME-version: 1.0;\r\nContent-Type: text/html; charset=\"UTF-8\";\r\n\r\n"
+	return s.send(toEmail, "Password Reset Request for Gordian", "text/html", buf.String())
+}
 
-	message := []byte(fromHeader + toHeader + subject + mime + "\r\n" + emailBody.String())
+func (s *GmailSMTPEmailService) SendEmailChangedNotice(oldEmail, newEmail string) error {
+	body := fmt.Sprintf(
+		"The email address for your Gordian account was changed to %s.\r\n\r\n"+
+			"If you did not make this change, reset your password immediately and contact support.\r\n",
+		newEmail,
+	)
+	return s.send(oldEmail, "Your Gordian email address was changed", "text/plain", body)
+}
+
+func (s *GmailSMTPEmailService) send(to, subject, contentType, body string) error {
+	toAddress, err := sanitizeAddress(to)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+
+	messageID := fmt.Sprintf("<%s@gordian>", uuid.NewString())
+	message := fmt.Sprintf(
+		"From: Gordian <%s>\r\n"+
+			"To: %s\r\n"+
+			"Subject: %s\r\n"+
+			"Date: %s\r\n"+
+			"Message-ID: %s\r\n"+
+			"MIME-Version: 1.0\r\n"+
+			"Content-Type: %s; charset=\"UTF-8\"\r\n"+
+			"Content-Transfer-Encoding: 8bit\r\n"+
+			"\r\n%s",
+		s.from,
+		toAddress,
+		subject,
+		time.Now().UTC().Format(time.RFC1123Z),
+		messageID,
+		contentType,
+		body,
+	)
 
 	auth := smtp.PlainAuth("", s.from, s.password, s.smtpHost)
-
-	err = smtp.SendMail(
+	if err := smtp.SendMail(
 		s.smtpHost+":"+s.smtpPort,
 		auth,
 		s.from,
-		[]string{toEmail},
-		message,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to send password reset email: %v", err)
+		[]string{toAddress},
+		[]byte(message),
+	); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
 	}
 
 	return nil
+}
+
+func sanitizeAddress(address string) (string, error) {
+	if strings.ContainsAny(address, "\r\n") {
+		return "", errors.New("address contains forbidden characters")
+	}
+	parsed, err := mail.ParseAddress(address)
+	if err != nil {
+		return "", err
+	}
+	return parsed.Address, nil
 }

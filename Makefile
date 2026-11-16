@@ -5,37 +5,45 @@ all: build
 
 build:
 	@echo "Building..."
-	@CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o main cmd/api/main.go
+	@CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o main ./cmd/api
 
 # Run the application
 run:
-	@go run cmd/api/main.go
-# Create DB container
-docker-run:
-	@if docker compose up --build 2>/dev/null; then \
-		: ; \
-	else \
-		echo "Falling back to Docker Compose V1"; \
-		docker-compose up --build; \
-	fi
+	@go run ./cmd/api
 
-# Shutdown DB container
-docker-down:
-	@if docker compose down 2>/dev/null; then \
-		: ; \
-	else \
-		echo "Falling back to Docker Compose V1"; \
-		docker-compose down; \
-	fi
-
-# Test the application
+# Run the test suite with the race detector
 test:
 	@echo "Testing..."
-	@go test ./... -v
-# Integrations Tests for the application
+	@go test -race ./...
+
+# Run integration tests (requires MONGODB_URI to point at a disposable database)
 itest:
 	@echo "Running integration tests..."
-	@go test ./internal/database -v
+	@go test -race -tags=integration ./internal/database -v
+
+# Static checks
+vet:
+	@go vet ./...
+
+fmt:
+	@test -z "$$(gofmt -l .)" || (echo "Files need formatting:"; gofmt -l .; exit 1)
+
+# Vulnerability scan. Known unfixed Echo advisories are allow-listed in the script.
+vuln:
+	@./scripts/govulncheck.sh
+
+# Regenerate Swagger documentation
+swagger:
+	@go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/api/main.go -o docs
+
+# Build the production Docker image
+docker-build:
+	@docker build --target prod -t gordian .
+
+# Run the production image with the local .env file
+docker-run:
+	@test -f .env || (echo "Missing .env; copy .env.example and configure it first"; exit 1)
+	@port="$${PORT:-10000}"; docker run --rm --env-file .env -e PORT="$$port" -p "$$port:$$port" gordian
 
 # Clean the binary
 clean:
@@ -59,4 +67,4 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch docker-run docker-down itest
+.PHONY: all build run test itest vet fmt vuln swagger clean watch docker-build docker-run
